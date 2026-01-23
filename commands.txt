@@ -1,0 +1,3 @@
+rm -r -fo /metaSynx
+git clone git@github.com:QuinSong/metaSynx.git
+flutter run -d windows
