@@ -1,3 +1,4 @@
-rm -r -fo /metaSynx
+rm -r -fo metaSynx
 git clone git@github.com:QuinSong/metaSynx.git
+cd metaSynx/win
 flutter run -d windows

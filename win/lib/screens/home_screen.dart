@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 import '../core/config.dart';
 import '../core/theme.dart';
-import '../services/relay_connection.dart';
-import '../services/room_service.dart';
+import '../services/services.dart';
 import '../components/components.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -14,23 +13,34 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   RelayConnection? _connection;
+  final EAService _eaService = EAService();
   ConnectionStatus _status = ConnectionStatus.disconnected;
   String? _roomId;
   String? _roomSecret;
   String? _qrData;
   bool _mobileConnected = false;
   String? _mobileDeviceName;
-  final List<String> _logs = [];
+  List<String> _logs = [];
+  List<Map<String, dynamic>> _accounts = [];
 
   @override
   void initState() {
     super.initState();
-    _initializeConnection();
+    _initializeServices();
   }
 
-  Future<void> _initializeConnection() async {
+  Future<void> _initializeServices() async {
     _addLog('Initializing MetaSynx Bridge...');
 
+    // Initialize EA Service
+    _eaService.onLog = _addLog;
+    _eaService.onAccountsUpdated = (accounts) {
+      setState(() => _accounts = accounts);
+    };
+    await _eaService.initialize();
+    _eaService.startPolling();
+
+    // Initialize Relay Connection
     _connection = RelayConnection(
       onStatusChanged: (status) {
         setState(() => _status = status);
@@ -85,21 +95,28 @@ class _HomeScreenState extends State<HomeScreen> {
         break;
 
       case 'get_accounts':
+        // Send real account data from EA
         _connection?.send({
           'action': 'accounts_list',
-          'accounts': _getMockAccounts(),
+          'accounts': _accounts,
         });
+        _addLog('Sent ${_accounts.length} accounts to mobile');
         break;
 
       case 'get_positions':
-        _connection?.send({
-          'action': 'positions_list',
-          'positions': [],
-        });
+        _handleGetPositions(message);
         break;
 
       case 'place_order':
-        _addLog('Order: ${message['symbol']} ${message['type']} ${message['lots']} lots');
+        _handlePlaceOrder(message);
+        break;
+
+      case 'close_position':
+        _handleClosePosition(message);
+        break;
+
+      case 'modify_position':
+        _handleModifyPosition(message);
         break;
 
       default:
@@ -107,11 +124,77 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  List<Map<String, dynamic>> _getMockAccounts() {
-    return [
-      {'index': 0, 'account': '12345678', 'balance': 10000.00, 'equity': 10250.50, 'broker': 'Demo Broker'},
-      {'index': 1, 'account': '87654321', 'balance': 5000.00, 'equity': 5120.75, 'broker': 'Demo Broker'},
-    ];
+  Future<void> _handleGetPositions(Map<String, dynamic> message) async {
+    final targetIndex = message['targetIndex'] as int?;
+    
+    if (targetIndex != null) {
+      await _eaService.requestPositions(targetIndex);
+      // Wait a bit for EA to respond, then read positions
+      await Future.delayed(const Duration(milliseconds: 500));
+      final positions = await _eaService.getPositions(targetIndex);
+      _connection?.send({
+        'action': 'positions_list',
+        'targetIndex': targetIndex,
+        'positions': positions,
+      });
+    } else {
+      // Get positions for all terminals
+      final allPositions = <Map<String, dynamic>>[];
+      for (final account in _accounts) {
+        final index = account['index'] as int;
+        await _eaService.requestPositions(index);
+        await Future.delayed(const Duration(milliseconds: 300));
+        final positions = await _eaService.getPositions(index);
+        for (final pos in positions) {
+          pos['terminalIndex'] = index;
+          allPositions.add(pos);
+        }
+      }
+      _connection?.send({
+        'action': 'positions_list',
+        'positions': allPositions,
+      });
+    }
+  }
+
+  Future<void> _handlePlaceOrder(Map<String, dynamic> message) async {
+    final symbol = message['symbol'] as String;
+    final type = message['type'] as String;
+    final lots = (message['lots'] as num).toDouble();
+    final sl = (message['sl'] as num?)?.toDouble();
+    final tp = (message['tp'] as num?)?.toDouble();
+    final targetIndex = message['targetIndex'] as int?;
+    final targetAll = message['targetAll'] as bool? ?? false;
+
+    _addLog('Order: $symbol $type $lots lots');
+
+    await _eaService.placeOrder(
+      symbol: symbol,
+      type: type,
+      lots: lots,
+      sl: sl,
+      tp: tp,
+      targetIndex: targetIndex,
+      targetAll: targetAll,
+    );
+  }
+
+  Future<void> _handleClosePosition(Map<String, dynamic> message) async {
+    final ticket = message['ticket'] as int;
+    final terminalIndex = message['terminalIndex'] as int;
+    
+    _addLog('Closing position: $ticket');
+    await _eaService.closePosition(ticket, terminalIndex);
+  }
+
+  Future<void> _handleModifyPosition(Map<String, dynamic> message) async {
+    final ticket = message['ticket'] as int;
+    final terminalIndex = message['terminalIndex'] as int;
+    final sl = (message['sl'] as num?)?.toDouble();
+    final tp = (message['tp'] as num?)?.toDouble();
+    
+    _addLog('Modifying position: $ticket');
+    await _eaService.modifyPosition(ticket, terminalIndex, sl: sl, tp: tp);
   }
 
   void _regenerateRoom() async {
@@ -138,6 +221,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     _connection?.disconnect();
+    _eaService.dispose();
     super.dispose();
   }
 
@@ -241,6 +325,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 InfoRow(label: 'Server', value: relayServer),
                 const SizedBox(height: 4),
                 InfoRow(label: 'Status', value: _status.name.toUpperCase()),
+                const SizedBox(height: 4),
+                InfoRow(label: 'MT4 Terminals', value: '${_accounts.length} connected'),
               ],
             ),
           ),
@@ -255,6 +341,30 @@ class _HomeScreenState extends State<HomeScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (_mobileConnected) MobileDeviceCard(deviceName: _mobileDeviceName),
+          
+          // Account cards
+          if (_accounts.isNotEmpty) ...[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Text(
+                'MT4 TERMINALS (${_accounts.length})',
+                style: AppTextStyles.label,
+              ),
+            ),
+            SizedBox(
+              height: 120,
+              child: ListView.builder(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                itemCount: _accounts.length,
+                itemBuilder: (context, index) {
+                  final account = _accounts[index];
+                  return _buildAccountCard(account);
+                },
+              ),
+            ),
+          ],
+          
           Expanded(
             child: ActivityLog(
               logs: _logs,
@@ -263,6 +373,99 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildAccountCard(Map<String, dynamic> account) {
+    final balance = (account['balance'] as num?)?.toDouble() ?? 0;
+    final equity = (account['equity'] as num?)?.toDouble() ?? 0;
+    final freeMargin = (account['freeMargin'] as num?)?.toDouble() ?? 0;
+    final accountNum = account['account'] as String? ?? 'Unknown';
+    final broker = account['broker'] as String? ?? '';
+    final currency = account['currency'] as String? ?? 'USD';
+    final connected = account['connected'] as bool? ?? false;
+
+    return Container(
+      width: 200,
+      margin: const EdgeInsets.all(4),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: connected 
+              ? AppColors.primaryWithOpacity(0.3) 
+              : AppColors.error.withOpacity(0.3),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(
+                  color: connected ? AppColors.primary : AppColors.error,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  accountNum,
+                  style: const TextStyle(
+                    color: AppColors.textPrimary,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            broker,
+            style: const TextStyle(
+              color: AppColors.textSecondary,
+              fontSize: 10,
+            ),
+            overflow: TextOverflow.ellipsis,
+          ),
+          const Spacer(),
+          _buildAccountRow('Balance', balance, currency),
+          _buildAccountRow('Equity', equity, currency),
+          _buildAccountRow('Free', freeMargin, currency),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAccountRow(String label, double value, String currency) {
+    final isProfit = value >= 0;
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            color: AppColors.textSecondary,
+            fontSize: 10,
+          ),
+        ),
+        Text(
+          '${value.toStringAsFixed(2)} $currency',
+          style: TextStyle(
+            color: label == 'Balance' 
+                ? AppColors.textPrimary 
+                : (isProfit ? AppColors.primary : AppColors.error),
+            fontSize: 11,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ],
     );
   }
 }
