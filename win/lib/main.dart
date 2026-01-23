@@ -14,8 +14,8 @@ void main() {
 // CONFIGURATION - UPDATE THESE
 // ============================================
 
-const String RELAY_SERVER = 'vps2.bk.harmonicmarkets.com:8443';
-const String API_KEY = 'YOUR_API_KEY_HERE'; // Your existing API key
+const String relayServer = 'vps2.bk.harmonicmarkets.com:8443';
+const String apiKey = '97b24Be3-8D3d-4413-b46A8-d2ae3a5cC1a5';
 
 // ============================================
 // APP
@@ -97,9 +97,9 @@ class _BridgeHomePageState extends State<BridgeHomePage> {
     try {
       // Create room via REST API
       final response = await http.post(
-        Uri.parse('https://$RELAY_SERVER/ws/relay/create-room'),
+        Uri.parse('https://$relayServer/ws/relay/create-room'),
         headers: {
-          'x-api-key': API_KEY,
+          'x-api-key': apiKey,
           'Content-Type': 'application/json',
         },
       );
@@ -127,7 +127,7 @@ class _BridgeHomePageState extends State<BridgeHomePage> {
   void _generateQrData() {
     // QR code contains server, room, and secret
     final qrPayload = {
-      'server': RELAY_SERVER,
+      'server': relayServer,
       'room': _roomId,
       'secret': _roomSecret,
       'v': 2, // Version for compatibility checking
@@ -350,7 +350,7 @@ class _BridgeHomePageState extends State<BridgeHomePage> {
                   padding: const EdgeInsets.all(16),
                   child: Column(
                     children: [
-                      _buildInfoRow('Server', RELAY_SERVER),
+                      _buildInfoRow('Server', relayServer),
                       const SizedBox(height: 4),
                       _buildInfoRow('Status', _status.name.toUpperCase()),
                     ],
@@ -699,7 +699,7 @@ class RelayConnection {
     onStatusChanged(ConnectionStatus.connecting);
 
     try {
-      final wsUrl = 'wss://$RELAY_SERVER/ws/relay/$roomId';
+      final wsUrl = 'wss://$relayServer/ws/relay/$roomId';
       onLog('Connecting to $wsUrl');
 
       _socket = await WebSocket.connect(wsUrl);
