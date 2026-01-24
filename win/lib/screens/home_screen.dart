@@ -20,7 +20,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _qrData;
   bool _mobileConnected = false;
   String? _mobileDeviceName;
-  List<String> _logs = [];
+  final List<String> _logs = [];
   List<Map<String, dynamic>> _accounts = [];
 
   @override

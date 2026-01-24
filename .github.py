@@ -2,7 +2,7 @@ import os
 import time
 
 
-msg = 'created MetaSynxEA.mq4'
+msg = 'created new_order_screen'
 
 
 os.system('git add .')

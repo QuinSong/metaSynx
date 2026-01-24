@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "MetaSynx"
 #property link      ""
-#property version   "1.00"
+#property version   "1.01"
 #property strict
 
 //+------------------------------------------------------------------+
@@ -22,7 +22,7 @@ string g_commandFile;
 string g_responseFile;
 string g_statusFile;
 int    g_terminalIndex = -1;
-datetime g_lastCommandCheck = 0;
+long   g_lastCommandTimestamp = 0;
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                    |
@@ -41,15 +41,16 @@ int OnInit()
    // Determine terminal index based on account number
    g_terminalIndex = GetTerminalIndex();
    
-   // Set up file names
-   g_statusFile = g_dataPath + "status_" + IntegerToString(g_terminalIndex) + ".json";
-   g_commandFile = g_dataPath + "commands.json";
-   g_responseFile = g_dataPath + "response_" + IntegerToString(g_terminalIndex) + ".json";
+   // Set up file names - each terminal has its own command file
+   g_statusFile = BridgeFolder + "\\status_" + IntegerToString(g_terminalIndex) + ".json";
+   g_commandFile = BridgeFolder + "\\command_" + IntegerToString(g_terminalIndex) + ".json";
+   g_responseFile = BridgeFolder + "\\response_" + IntegerToString(g_terminalIndex) + ".json";
    
    Print("MetaSynx EA initialized");
    Print("Terminal Index: ", g_terminalIndex);
    Print("Data Path: ", g_dataPath);
    Print("Account: ", AccountNumber());
+   Print("Command File: ", g_commandFile);
    
    // Write initial status
    WriteAccountStatus();
@@ -68,9 +69,9 @@ void OnDeinit(const int reason)
    EventKillTimer();
    
    // Clean up status file on exit
-   if(FileIsExist(BridgeFolder + "\\status_" + IntegerToString(g_terminalIndex) + ".json", FILE_COMMON))
+   if(FileIsExist(g_statusFile, FILE_COMMON))
    {
-      FileDelete(BridgeFolder + "\\status_" + IntegerToString(g_terminalIndex) + ".json", FILE_COMMON);
+      FileDelete(g_statusFile, FILE_COMMON);
    }
    
    Print("MetaSynx EA deinitialized");
@@ -94,7 +95,6 @@ void OnTimer()
 int GetTerminalIndex()
 {
    // Use account number to create a simple index
-   // In production, you might want a more sophisticated method
    long accountNum = AccountNumber();
    
    // Read existing terminals to find our index or assign new one
@@ -111,7 +111,6 @@ int GetTerminalIndex()
       FileClose(handle);
       
       // Parse to find existing index for this account
-      // Simple parsing - look for our account number
       string searchStr = "\"" + IntegerToString(accountNum) + "\":";
       int pos = StringFind(content, searchStr);
       if(pos >= 0)
@@ -210,8 +209,7 @@ void WriteAccountStatus()
    json += "\"tradeAllowed\":" + (IsTradeAllowed() ? "true" : "false");
    json += "}";
    
-   string fileName = BridgeFolder + "\\status_" + IntegerToString(g_terminalIndex) + ".json";
-   int handle = FileOpen(fileName, FILE_WRITE|FILE_TXT|FILE_COMMON);
+   int handle = FileOpen(g_statusFile, FILE_WRITE|FILE_TXT|FILE_COMMON);
    if(handle != INVALID_HANDLE)
    {
       FileWriteString(handle, json);
@@ -228,20 +226,12 @@ void WriteAccountStatus()
 //+------------------------------------------------------------------+
 void CheckAndProcessCommands()
 {
-   string commandFile = BridgeFolder + "\\commands.json";
-   
-   if(!FileIsExist(commandFile, FILE_COMMON))
+   // Check for per-terminal command file
+   if(!FileIsExist(g_commandFile, FILE_COMMON))
       return;
-   
-   // Check file modification time
-   datetime fileTime = (datetime)FileGetInteger(commandFile, FILE_MODIFY_DATE, FILE_COMMON);
-   if(fileTime <= g_lastCommandCheck)
-      return;
-   
-   g_lastCommandCheck = fileTime;
    
    // Read command file
-   int handle = FileOpen(commandFile, FILE_READ|FILE_TXT|FILE_COMMON);
+   int handle = FileOpen(g_commandFile, FILE_READ|FILE_TXT|FILE_COMMON);
    if(handle == INVALID_HANDLE)
       return;
    
@@ -255,8 +245,20 @@ void CheckAndProcessCommands()
    if(StringLen(content) < 5)
       return;
    
-   // Parse and process command
+   // Check timestamp to avoid processing same command twice
+   string timestampStr = ExtractJsonString(content, "timestamp");
+   long timestamp = StringToInteger(timestampStr);
+   
+   if(timestamp <= g_lastCommandTimestamp)
+      return;
+   
+   g_lastCommandTimestamp = timestamp;
+   
+   // Process command
    ProcessCommand(content);
+   
+   // Delete command file after processing
+   FileDelete(g_commandFile, FILE_COMMON);
 }
 
 //+------------------------------------------------------------------+
@@ -272,17 +274,6 @@ void ProcessCommand(string jsonCommand)
    if(action == "")
       return;
    
-   // Check if this command is for us (check targetIndex or targetAll)
-   string targetIndexStr = ExtractJsonString(jsonCommand, "targetIndex");
-   bool targetAll = (StringFind(jsonCommand, "\"targetAll\":true") >= 0);
-   
-   if(!targetAll && targetIndexStr != "")
-   {
-      int targetIndex = (int)StringToInteger(targetIndexStr);
-      if(targetIndex != g_terminalIndex)
-         return; // Not for us
-   }
-   
    // Process based on action
    if(action == "get_positions")
    {
@@ -296,6 +287,7 @@ void ProcessCommand(string jsonCommand)
       double sl = StringToDouble(ExtractJsonString(jsonCommand, "sl"));
       double tp = StringToDouble(ExtractJsonString(jsonCommand, "tp"));
       
+      Print("Placing order: ", symbol, " ", type, " ", lots, " lots, SL=", sl, " TP=", tp);
       PlaceOrder(symbol, type, lots, sl, tp);
    }
    else if(action == "close_position")
@@ -310,6 +302,10 @@ void ProcessCommand(string jsonCommand)
       double tp = StringToDouble(ExtractJsonString(jsonCommand, "tp"));
       
       ModifyPosition(ticket, sl, tp);
+   }
+   else
+   {
+      Print("Unknown action: ", action);
    }
 }
 
@@ -365,16 +361,22 @@ void PlaceOrder(string symbol, string type, double lots, double sl, double tp)
 {
    int orderType;
    double price;
+   color arrowColor;
+   
+   // Refresh rates
+   RefreshRates();
    
    if(type == "buy")
    {
       orderType = OP_BUY;
       price = MarketInfo(symbol, MODE_ASK);
+      arrowColor = clrGreen;
    }
    else if(type == "sell")
    {
       orderType = OP_SELL;
       price = MarketInfo(symbol, MODE_BID);
+      arrowColor = clrRed;
    }
    else
    {
@@ -383,24 +385,44 @@ void PlaceOrder(string symbol, string type, double lots, double sl, double tp)
    }
    
    // Validate symbol
-   if(MarketInfo(symbol, MODE_BID) == 0)
+   double bid = MarketInfo(symbol, MODE_BID);
+   if(bid == 0)
    {
       WriteResponse(false, "Invalid symbol: " + symbol, 0);
       return;
    }
    
-   int ticket = OrderSend(symbol, orderType, lots, price, 3, sl, tp, "MetaSynx", 0, 0, clrNONE);
+   // Normalize lot size
+   double minLot = MarketInfo(symbol, MODE_MINLOT);
+   double maxLot = MarketInfo(symbol, MODE_MAXLOT);
+   double lotStep = MarketInfo(symbol, MODE_LOTSTEP);
+   
+   lots = MathMax(minLot, MathMin(maxLot, lots));
+   lots = NormalizeDouble(MathRound(lots / lotStep) * lotStep, 2);
+   
+   // Normalize price
+   int digits = (int)MarketInfo(symbol, MODE_DIGITS);
+   price = NormalizeDouble(price, digits);
+   
+   // Normalize SL/TP if provided
+   if(sl > 0) sl = NormalizeDouble(sl, digits);
+   if(tp > 0) tp = NormalizeDouble(tp, digits);
+   
+   Print("Executing OrderSend: ", symbol, " ", orderType, " ", lots, " @ ", price, " SL=", sl, " TP=", tp);
+   
+   int ticket = OrderSend(symbol, orderType, lots, price, 30, sl, tp, "MetaSynx", 12345, 0, arrowColor);
    
    if(ticket > 0)
    {
       WriteResponse(true, "Order placed successfully", ticket);
-      Print("Order placed: ", symbol, " ", type, " ", lots, " lots, ticket: ", ticket);
+      Print("Order placed successfully: ", symbol, " ", type, " ", lots, " lots, ticket: ", ticket);
    }
    else
    {
       int error = GetLastError();
-      WriteResponse(false, "Order failed: " + IntegerToString(error) + " - " + ErrorDescription(error), 0);
-      Print("Order failed: ", error, " - ", ErrorDescription(error));
+      string errMsg = "Order failed: " + IntegerToString(error) + " - " + ErrorDescription(error);
+      WriteResponse(false, errMsg, 0);
+      Print(errMsg);
    }
 }
 
@@ -415,9 +437,13 @@ void ClosePosition(int ticket)
       return;
    }
    
-   double price = OrderType() == OP_BUY ? MarketInfo(OrderSymbol(), MODE_BID) : MarketInfo(OrderSymbol(), MODE_ASK);
+   RefreshRates();
    
-   bool result = OrderClose(ticket, OrderLots(), price, 3, clrNONE);
+   double price = OrderType() == OP_BUY ? MarketInfo(OrderSymbol(), MODE_BID) : MarketInfo(OrderSymbol(), MODE_ASK);
+   int digits = (int)MarketInfo(OrderSymbol(), MODE_DIGITS);
+   price = NormalizeDouble(price, digits);
+   
+   bool result = OrderClose(ticket, OrderLots(), price, 30, clrYellow);
    
    if(result)
    {
@@ -443,7 +469,11 @@ void ModifyPosition(int ticket, double sl, double tp)
       return;
    }
    
-   bool result = OrderModify(ticket, OrderOpenPrice(), sl, tp, 0, clrNONE);
+   int digits = (int)MarketInfo(OrderSymbol(), MODE_DIGITS);
+   if(sl > 0) sl = NormalizeDouble(sl, digits);
+   if(tp > 0) tp = NormalizeDouble(tp, digits);
+   
+   bool result = OrderModify(ticket, OrderOpenPrice(), sl, tp, 0, clrBlue);
    
    if(result)
    {
@@ -465,14 +495,14 @@ void WriteResponse(bool success, string message, int ticket)
 {
    string json = "{";
    json += "\"index\":" + IntegerToString(g_terminalIndex) + ",";
+   json += "\"account\":\"" + IntegerToString(AccountNumber()) + "\",";
    json += "\"success\":" + (success ? "true" : "false") + ",";
    json += "\"message\":\"" + message + "\",";
    json += "\"ticket\":" + IntegerToString(ticket) + ",";
    json += "\"timestamp\":\"" + TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS) + "\"";
    json += "}";
    
-   string fileName = BridgeFolder + "\\response_" + IntegerToString(g_terminalIndex) + ".json";
-   int handle = FileOpen(fileName, FILE_WRITE|FILE_TXT|FILE_COMMON);
+   int handle = FileOpen(g_responseFile, FILE_WRITE|FILE_TXT|FILE_COMMON);
    if(handle != INVALID_HANDLE)
    {
       FileWriteString(handle, json);

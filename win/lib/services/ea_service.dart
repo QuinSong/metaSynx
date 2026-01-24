@@ -99,20 +99,22 @@ class EAService {
     }
   }
 
-  /// Send a command to EA(s)
-  Future<void> sendCommand(Map<String, dynamic> command) async {
+  /// Send a command to a specific terminal
+  Future<void> sendCommandToTerminal(int terminalIndex, Map<String, dynamic> command) async {
     if (_commonDataPath == null) {
       onLog?.call('Cannot send command: EA service not initialized');
       return;
     }
 
-    final filePath = '$_commonDataPath\\Files\\$_bridgeFolder\\commands.json';
+    // Use per-terminal command file
+    final filePath = '$_commonDataPath\\Files\\$_bridgeFolder\\command_$terminalIndex.json';
     final file = File(filePath);
     
     try {
+      command['timestamp'] = DateTime.now().millisecondsSinceEpoch;
       final json = jsonEncode(command);
       await file.writeAsString(json);
-      onLog?.call('Command sent: ${command['action']}');
+      onLog?.call('Command sent to terminal $terminalIndex: ${command['action']}');
     } catch (e) {
       onLog?.call('Error sending command: $e');
     }
@@ -120,13 +122,12 @@ class EAService {
 
   /// Request positions from a terminal
   Future<void> requestPositions(int terminalIndex) async {
-    await sendCommand({
+    await sendCommandToTerminal(terminalIndex, {
       'action': 'get_positions',
-      'targetIndex': terminalIndex,
     });
   }
 
-  /// Place an order
+  /// Place an order on specific terminal
   Future<void> placeOrder({
     required String symbol,
     required String type,
@@ -136,33 +137,42 @@ class EAService {
     int? targetIndex,
     bool targetAll = false,
   }) async {
-    await sendCommand({
+    final command = {
       'action': 'place_order',
       'symbol': symbol,
       'type': type,
       'lots': lots,
       'sl': sl ?? 0,
       'tp': tp ?? 0,
-      if (targetIndex != null) 'targetIndex': targetIndex,
-      if (targetAll) 'targetAll': true,
-    });
+    };
+
+    if (targetIndex != null) {
+      await sendCommandToTerminal(targetIndex, command);
+    } else if (targetAll) {
+      // Send to all connected terminals
+      final accounts = await getAccounts();
+      for (final account in accounts) {
+        final index = account['index'] as int;
+        await sendCommandToTerminal(index, command);
+        // Small delay between commands
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
+    }
   }
 
   /// Close a position
   Future<void> closePosition(int ticket, int terminalIndex) async {
-    await sendCommand({
+    await sendCommandToTerminal(terminalIndex, {
       'action': 'close_position',
       'ticket': ticket,
-      'targetIndex': terminalIndex,
     });
   }
 
   /// Modify a position
   Future<void> modifyPosition(int ticket, int terminalIndex, {double? sl, double? tp}) async {
-    await sendCommand({
+    await sendCommandToTerminal(terminalIndex, {
       'action': 'modify_position',
       'ticket': ticket,
-      'targetIndex': terminalIndex,
       'sl': sl ?? 0,
       'tp': tp ?? 0,
     });
