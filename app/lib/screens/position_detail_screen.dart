@@ -9,6 +9,7 @@ class PositionDetailScreen extends StatefulWidget {
   final void Function(int ticket, int terminalIndex) onClosePosition;
   final void Function(int ticket, int terminalIndex, double? sl, double? tp) onModifyPosition;
   final VoidCallback onRefreshAllPositions;
+  final Map<String, String> accountNames;
 
   const PositionDetailScreen({
     super.key,
@@ -18,6 +19,7 @@ class PositionDetailScreen extends StatefulWidget {
     required this.onClosePosition,
     required this.onModifyPosition,
     required this.onRefreshAllPositions,
+    required this.accountNames,
   });
 
   @override
@@ -33,16 +35,20 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
   final _tpController = TextEditingController();
   bool _isProcessing = false;
   Timer? _refreshTimer;
+  int _digits = 5; // Default to 5 decimal places
 
   @override
   void initState() {
     super.initState();
     
-    // Pre-fill SL/TP from current position
+    // Detect digits from open price
+    _digits = _detectDigits(widget.position['openPrice']);
+    
+    // Pre-fill SL/TP from current position using detected digits
     final sl = (widget.position['sl'] as num?)?.toDouble() ?? 0;
     final tp = (widget.position['tp'] as num?)?.toDouble() ?? 0;
-    if (sl > 0) _slController.text = sl.toStringAsFixed(5);
-    if (tp > 0) _tpController.text = tp.toStringAsFixed(5);
+    if (sl > 0) _slController.text = sl.toStringAsFixed(_digits);
+    if (tp > 0) _tpController.text = tp.toStringAsFixed(_digits);
     
     // Initialize with the original position's terminal
     final originalTerminal = widget.position['terminalIndex'] as int;
@@ -57,6 +63,39 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
     _refreshTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       widget.onRefreshAllPositions();
     });
+  }
+
+  /// Detect number of decimal places from a price value
+  int _detectDigits(dynamic price) {
+    if (price == null) return 5;
+    
+    final priceStr = price.toString();
+    final dotIndex = priceStr.indexOf('.');
+    if (dotIndex < 0) return 0;
+    
+    // Count digits after decimal, ignoring trailing zeros
+    final decimals = priceStr.substring(dotIndex + 1);
+    
+    // For forex pairs, typically 5 or 3 digits
+    // For metals/indices, typically 2-3 digits
+    // For crypto, can vary widely
+    
+    // Use the actual decimal places from the price
+    int digits = decimals.length;
+    
+    // Common patterns:
+    // EURUSD: 1.12345 = 5 digits
+    // USDJPY: 150.123 = 3 digits  
+    // XAUUSD: 2650.12 = 2 digits
+    // BTCUSD: 45000.00 = 2 digits
+    
+    // Cap at reasonable max
+    return digits.clamp(0, 8);
+  }
+
+  String _formatPrice(double? price) {
+    if (price == null) return '-';
+    return price.toStringAsFixed(_digits);
   }
 
   void _onPositionsUpdated() {
@@ -135,7 +174,12 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
       final account = widget.accounts.firstWhere(
         (a) => a['index'] == terminalIndex,
       );
-      return account['account'] as String? ?? 'Account $terminalIndex';
+      final accountNum = account['account'] as String? ?? '';
+      final customName = widget.accountNames[accountNum];
+      if (customName != null && customName.isNotEmpty) {
+        return customName;
+      }
+      return accountNum.isNotEmpty ? accountNum : 'Account $terminalIndex';
     } catch (e) {
       return 'Account $terminalIndex';
     }
@@ -379,7 +423,7 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
                               children: [
                                 const Text('Open Price', style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
                                 Text(
-                                  openPrice.toStringAsFixed(5),
+                                  _formatPrice(openPrice),
                                   style: const TextStyle(color: Colors.white, fontSize: 16),
                                 ),
                               ],
@@ -391,7 +435,7 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
                               children: [
                                 const Text('Current Price', style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
                                 Text(
-                                  currentPrice.toStringAsFixed(5),
+                                  _formatPrice(currentPrice),
                                   style: TextStyle(
                                     color: isBuy 
                                         ? (currentPrice >= openPrice ? AppColors.primary : AppColors.error)
@@ -572,7 +616,7 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
                             keyboardType: const TextInputType.numberWithOptions(decimal: true),
                             style: const TextStyle(color: Colors.white),
                             decoration: InputDecoration(
-                              hintText: '0.00000',
+                              hintText: _formatPrice(0),
                               hintStyle: TextStyle(color: AppColors.textSecondary.withOpacity(0.5)),
                               filled: true,
                               fillColor: AppColors.surface,
@@ -598,7 +642,7 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
                             keyboardType: const TextInputType.numberWithOptions(decimal: true),
                             style: const TextStyle(color: Colors.white),
                             decoration: InputDecoration(
-                              hintText: '0.00000',
+                              hintText: _formatPrice(0),
                               hintStyle: TextStyle(color: AppColors.textSecondary.withOpacity(0.5)),
                               filled: true,
                               fillColor: AppColors.surface,

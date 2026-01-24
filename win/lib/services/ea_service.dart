@@ -189,13 +189,14 @@ class EAService {
   }
 
   /// Modify a position - waits for confirmation
+  /// sl/tp: null = keep existing (-1), 0 = remove, >0 = set new value
   Future<bool> modifyPosition(int ticket, int terminalIndex, {double? sl, double? tp}) async {
     onLog?.call('Modifying position: ticket=$ticket, SL=$sl, TP=$tp on terminal $terminalIndex');
     return await sendCommandToTerminal(terminalIndex, {
       'action': 'modify_position',
       'ticket': ticket,
-      'sl': sl ?? 0,
-      'tp': tp ?? 0,
+      'sl': sl ?? -1,
+      'tp': tp ?? -1,
     });
   }
 

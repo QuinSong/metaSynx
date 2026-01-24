@@ -10,6 +10,7 @@ import '../components/scan_button.dart';
 import 'qr_scanner_screen.dart';
 import 'new_order_screen.dart';
 import 'account_detail_screen.dart';
+import 'account_settings_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -27,13 +28,34 @@ class _HomeScreenState extends State<HomeScreen> {
       ValueNotifier<List<Map<String, dynamic>>>([]);
   final ValueNotifier<List<Map<String, dynamic>>> _positionsNotifier =
       ValueNotifier<List<Map<String, dynamic>>>([]);
+  Map<String, String> _accountNames = {};
   Timer? _refreshTimer;
 
   @override
   void initState() {
     super.initState();
+    _loadAccountNames();
     _setupConnection();
     _tryAutoConnect();
+  }
+
+  Future<void> _loadAccountNames() async {
+    final prefs = await SharedPreferences.getInstance();
+    final namesJson = prefs.getString('account_names');
+    if (namesJson != null) {
+      setState(() {
+        _accountNames = Map<String, String>.from(jsonDecode(namesJson));
+      });
+    }
+  }
+
+  String getAccountDisplayName(Map<String, dynamic> account) {
+    final accountNum = account['account'] as String? ?? '';
+    final customName = _accountNames[accountNum];
+    if (customName != null && customName.isNotEmpty) {
+      return customName;
+    }
+    return accountNum;
   }
 
   void _setupConnection() {
@@ -185,12 +207,13 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _modifyPosition(int ticket, int terminalIndex, double? sl, double? tp) {
+    // -1 = keep existing, 0 = remove, >0 = set new value
     _connection.send({
       'action': 'modify_position',
       'ticket': ticket,
       'terminalIndex': terminalIndex,
-      'sl': sl ?? 0,
-      'tp': tp ?? 0,
+      'sl': sl ?? -1,
+      'tp': tp ?? -1,
     });
   }
 
@@ -207,6 +230,7 @@ class _HomeScreenState extends State<HomeScreen> {
           onRefreshAllPositions: _requestAllPositions,
           onClosePosition: _closePosition,
           onModifyPosition: _modifyPosition,
+          accountNames: _accountNames,
         ),
       ),
     );
@@ -364,11 +388,36 @@ class _HomeScreenState extends State<HomeScreen> {
       children: [
         const Text('METASYNX', style: AppTextStyles.heading),
         const Spacer(),
+        if (_connectionState == relay.ConnectionState.connected &&
+            _bridgeConnected &&
+            _accountsNotifier.value.isNotEmpty)
+          IconButton(
+            icon: const Icon(Icons.settings, color: AppColors.textSecondary),
+            onPressed: _openAccountSettings,
+            tooltip: 'Account Settings',
+          ),
         ConnectionIndicator(
           connectionState: _connectionState,
           bridgeConnected: _bridgeConnected,
         ),
       ],
+    );
+  }
+
+  void _openAccountSettings() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => AccountSettingsScreen(
+          accounts: _accountsNotifier.value,
+          accountNames: _accountNames,
+          onNamesUpdated: (names) {
+            setState(() {
+              _accountNames = names;
+            });
+          },
+        ),
+      ),
     );
   }
 
@@ -390,8 +439,9 @@ class _HomeScreenState extends State<HomeScreen> {
     final equity = (account['equity'] as num?)?.toDouble() ?? 0;
     final profit = (account['profit'] as num?)?.toDouble() ?? 0;
     final accountNum = account['account'] as String? ?? 'Unknown';
-    final name = account['name'] as String? ?? '';
     final currency = account['currency'] as String? ?? 'USD';
+    final displayName = getAccountDisplayName(account);
+    final hasCustomName = _accountNames[accountNum]?.isNotEmpty == true;
 
     return GestureDetector(
       onTap: () => _openAccountDetail(account),
@@ -409,24 +459,30 @@ class _HomeScreenState extends State<HomeScreen> {
             // Account number & name
             Row(
               children: [
-                Text(
-                  accountNum,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        displayName,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      if (hasCustomName)
+                        Text(
+                          accountNum,
+                          style: const TextStyle(
+                            color: AppColors.textSecondary,
+                            fontSize: 12,
+                          ),
+                        ),
+                    ],
                   ),
                 ),
-                if (name.isNotEmpty) ...[
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      name,
-                      style: AppTextStyles.body,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
                 const Icon(
                   Icons.chevron_right,
                   color: AppColors.textSecondary,

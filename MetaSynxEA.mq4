@@ -366,6 +366,7 @@ void ClosePosition(int ticket)
 
 //+------------------------------------------------------------------+
 //| Modify position                                                   |
+//| sl/tp: -1 = keep existing, 0 = remove, >0 = set new value        |
 //+------------------------------------------------------------------+
 void ModifyPosition(int ticket, double sl, double tp)
 {
@@ -384,8 +385,17 @@ void ModifyPosition(int ticket, double sl, double tp)
    }
    
    int digits = (int)MarketInfo(OrderSymbol(), MODE_DIGITS);
-   double newSL = sl > 0 ? NormalizeDouble(sl, digits) : OrderStopLoss();
-   double newTP = tp > 0 ? NormalizeDouble(tp, digits) : OrderTakeProfit();
+   
+   // -1 means keep existing, 0 means remove, >0 means set new value
+   double newSL;
+   if(sl < 0) newSL = OrderStopLoss();        // Keep existing
+   else if(sl == 0) newSL = 0;                 // Remove SL
+   else newSL = NormalizeDouble(sl, digits);   // Set new value
+   
+   double newTP;
+   if(tp < 0) newTP = OrderTakeProfit();       // Keep existing
+   else if(tp == 0) newTP = 0;                 // Remove TP
+   else newTP = NormalizeDouble(tp, digits);   // Set new value
    
    Print("MODIFYING: ticket=", ticket, " newSL=", newSL, " newTP=", newTP);
    

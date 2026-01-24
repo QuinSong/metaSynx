@@ -11,6 +11,7 @@ class AccountDetailScreen extends StatefulWidget {
   final VoidCallback onRefreshAllPositions;
   final void Function(int ticket, int terminalIndex) onClosePosition;
   final void Function(int ticket, int terminalIndex, double? sl, double? tp) onModifyPosition;
+  final Map<String, String> accountNames;
 
   const AccountDetailScreen({
     super.key,
@@ -21,6 +22,7 @@ class AccountDetailScreen extends StatefulWidget {
     required this.onRefreshAllPositions,
     required this.onClosePosition,
     required this.onModifyPosition,
+    required this.accountNames,
   });
 
   @override
@@ -34,6 +36,21 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
   Set<String> _selectedPairs = {};
   Set<String> _allKnownPairs = {};
   bool _filtersInitialized = false;
+
+  String _getAccountDisplayName(String accountNum) {
+    final customName = widget.accountNames[accountNum];
+    if (customName != null && customName.isNotEmpty) {
+      return customName;
+    }
+    return accountNum;
+  }
+
+  int _detectDigits(double price) {
+    final priceStr = price.toString();
+    final dotIndex = priceStr.indexOf('.');
+    if (dotIndex < 0) return 0;
+    return priceStr.substring(dotIndex + 1).length.clamp(0, 8);
+  }
 
   @override
   void initState() {
@@ -54,16 +71,25 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
 
   void _onPositionsUpdated() {
     final positions = _getAllPositionsForAccount();
+    final currentPairs = positions.map((p) => p['symbol'] as String? ?? '').toSet();
     
-    // Initialize filters with all pairs selected on first load only
+    // Initialize filters with all pairs selected on first load
     if (!_filtersInitialized && positions.isNotEmpty) {
-      final pairs = positions.map((p) => p['symbol'] as String? ?? '').toSet();
       setState(() {
-        _selectedPairs = pairs;
-        _allKnownPairs.addAll(pairs);
+        _selectedPairs = Set.from(currentPairs);
+        _allKnownPairs = Set.from(currentPairs);
         _filtersInitialized = true;
         _positionsLoaded = true;
       });
+    } else if (_filtersInitialized) {
+      // Auto-select any new pairs that appear
+      final newPairs = currentPairs.difference(_allKnownPairs);
+      if (newPairs.isNotEmpty) {
+        setState(() {
+          _selectedPairs.addAll(newPairs);
+          _allKnownPairs.addAll(newPairs);
+        });
+      }
     } else if (!_positionsLoaded) {
       Future.delayed(const Duration(milliseconds: 1500), () {
         if (mounted && !_positionsLoaded) {
@@ -191,7 +217,6 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
     final profit = (account['profit'] as num?)?.toDouble() ?? 0;
     final marginLevel = (account['marginLevel'] as num?)?.toDouble() ?? 0;
     final accountNum = account['account'] as String? ?? 'Unknown';
-    final name = account['name'] as String? ?? '';
     final broker = account['broker'] as String? ?? '';
     final server = account['server'] as String? ?? '';
     final currency = account['currency'] as String? ?? 'USD';
@@ -199,6 +224,8 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
     final connected = account['connected'] as bool? ?? false;
     final tradeAllowed = account['tradeAllowed'] as bool? ?? false;
     final openPositions = account['openPositions'] as int? ?? 0;
+    final displayName = _getAccountDisplayName(accountNum);
+    final hasCustomName = widget.accountNames[accountNum]?.isNotEmpty == true;
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -222,15 +249,15 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      accountNum,
+                      displayName,
                       style: const TextStyle(
                         color: Colors.white,
                         fontSize: 22,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
-                    if (name.isNotEmpty)
-                      Text(name, style: AppTextStyles.body),
+                    if (hasCustomName)
+                      Text(accountNum, style: AppTextStyles.body),
                   ],
                 ),
               ),
@@ -481,6 +508,7 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
 
     final isBuy = type.toLowerCase() == 'buy';
     final totalProfit = profit + swap + commission;
+    final digits = _detectDigits(openPrice);
 
     return GestureDetector(
       onTap: () => _openPositionDetail(position),
@@ -539,10 +567,10 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
           Row(
             children: [
               Expanded(
-                child: _buildPriceItem('Open', openPrice.toStringAsFixed(5)),
+                child: _buildPriceItem('Open', openPrice.toStringAsFixed(digits)),
               ),
               Expanded(
-                child: _buildPriceItem('Current', currentPrice.toStringAsFixed(5)),
+                child: _buildPriceItem('Current', currentPrice.toStringAsFixed(digits)),
               ),
               Expanded(
                 child: Column(
@@ -571,10 +599,10 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
           Row(
             children: [
               Expanded(
-                child: _buildPriceItem('SL', sl > 0 ? sl.toStringAsFixed(5) : '-'),
+                child: _buildPriceItem('SL', sl > 0 ? sl.toStringAsFixed(digits) : '-'),
               ),
               Expanded(
-                child: _buildPriceItem('TP', tp > 0 ? tp.toStringAsFixed(5) : '-'),
+                child: _buildPriceItem('TP', tp > 0 ? tp.toStringAsFixed(digits) : '-'),
               ),
               Expanded(
                 child: _buildPriceItem('Swap', swap.toStringAsFixed(2)),
@@ -617,6 +645,7 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
           onClosePosition: widget.onClosePosition,
           onModifyPosition: widget.onModifyPosition,
           onRefreshAllPositions: widget.onRefreshAllPositions,
+          accountNames: widget.accountNames,
         ),
       ),
     );
