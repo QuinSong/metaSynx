@@ -2,7 +2,7 @@ import os
 import time
 
 
-msg = 'added order magic'
+msg = 'update'
 
 
 os.system('git add .')

@@ -160,6 +160,30 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
+  void _requestAllPositions() {
+    _connection.send({
+      'action': 'get_positions',
+    });
+  }
+
+  void _closePosition(int ticket, int terminalIndex) {
+    _connection.send({
+      'action': 'close_position',
+      'ticket': ticket,
+      'terminalIndex': terminalIndex,
+    });
+  }
+
+  void _modifyPosition(int ticket, int terminalIndex, double? sl, double? tp) {
+    _connection.send({
+      'action': 'modify_position',
+      'ticket': ticket,
+      'terminalIndex': terminalIndex,
+      'sl': sl ?? 0,
+      'tp': tp ?? 0,
+    });
+  }
+
   void _openAccountDetail(Map<String, dynamic> account) {
     final accountIndex = account['index'] as int;
     Navigator.push(
@@ -170,6 +194,9 @@ class _HomeScreenState extends State<HomeScreen> {
           accountsNotifier: _accountsNotifier,
           positionsNotifier: _positionsNotifier,
           onRefreshPositions: () => _requestPositions(accountIndex),
+          onRefreshAllPositions: _requestAllPositions,
+          onClosePosition: _closePosition,
+          onModifyPosition: _modifyPosition,
         ),
       ),
     );

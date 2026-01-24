@@ -1,12 +1,16 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
 import '../core/theme.dart';
+import 'position_detail_screen.dart';
 
 class AccountDetailScreen extends StatefulWidget {
   final Map<String, dynamic> initialAccount;
   final ValueNotifier<List<Map<String, dynamic>>> accountsNotifier;
   final ValueNotifier<List<Map<String, dynamic>>> positionsNotifier;
   final VoidCallback onRefreshPositions;
+  final VoidCallback onRefreshAllPositions;
+  final void Function(int ticket, int terminalIndex) onClosePosition;
+  final void Function(int ticket, int terminalIndex, double? sl, double? tp) onModifyPosition;
 
   const AccountDetailScreen({
     super.key,
@@ -14,6 +18,9 @@ class AccountDetailScreen extends StatefulWidget {
     required this.accountsNotifier,
     required this.positionsNotifier,
     required this.onRefreshPositions,
+    required this.onRefreshAllPositions,
+    required this.onClosePosition,
+    required this.onModifyPosition,
   });
 
   @override
@@ -32,13 +39,13 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
   void initState() {
     super.initState();
     _accountIndex = widget.initialAccount['index'] as int;
-
+    
     // Listen for positions updates
     widget.positionsNotifier.addListener(_onPositionsUpdated);
-
+    
     // Request positions immediately
     widget.onRefreshPositions();
-
+    
     // Start periodic refresh
     _refreshTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       widget.onRefreshPositions();
@@ -47,7 +54,7 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
 
   void _onPositionsUpdated() {
     final positions = _getAllPositionsForAccount();
-
+    
     // Initialize filters with all pairs selected on first load only
     if (!_filtersInitialized && positions.isNotEmpty) {
       final pairs = positions.map((p) => p['symbol'] as String? ?? '').toSet();
@@ -93,21 +100,21 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
     final positions = _getAllPositionsForAccount()
         .where((p) => _selectedPairs.contains(p['symbol'] as String? ?? ''))
         .toList();
-
+    
     // Sort by symbol first, then by open time (most recent first)
     positions.sort((a, b) {
       final symbolA = a['symbol'] as String? ?? '';
       final symbolB = b['symbol'] as String? ?? '';
       final symbolCompare = symbolA.compareTo(symbolB);
-
+      
       if (symbolCompare != 0) return symbolCompare;
-
+      
       // Same symbol - sort by open time descending (most recent first)
       final timeA = a['openTime'] as String? ?? '';
       final timeB = b['openTime'] as String? ?? '';
       return timeB.compareTo(timeA);
     });
-
+    
     return positions;
   }
 
@@ -165,12 +172,7 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
                   children: [
                     _buildAccountInfoCard(account),
                     const SizedBox(height: 24),
-                    _buildPositionsSection(
-                      allPositions,
-                      filteredPositions,
-                      pairCounts,
-                    ),
-                    const SizedBox(height: 50),
+                    _buildPositionsSection(allPositions, filteredPositions, pairCounts),
                   ],
                 ),
               );
@@ -227,7 +229,8 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
                         fontWeight: FontWeight.bold,
                       ),
                     ),
-                    if (name.isNotEmpty) Text(name, style: AppTextStyles.body),
+                    if (name.isNotEmpty)
+                      Text(name, style: AppTextStyles.body),
                   ],
                 ),
               ),
@@ -286,38 +289,21 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
           // Details grid
           Row(
             children: [
-              Expanded(
-                child: _buildDetailItem(
-                  'Free Margin',
-                  '${freeMargin.toStringAsFixed(2)} $currency',
-                ),
-              ),
-              Expanded(
-                child: _buildDetailItem(
-                  'Used Margin',
-                  '${margin.toStringAsFixed(2)} $currency',
-                ),
-              ),
+              Expanded(child: _buildDetailItem('Free Margin', '${freeMargin.toStringAsFixed(2)} $currency')),
+              Expanded(child: _buildDetailItem('Used Margin', '${margin.toStringAsFixed(2)} $currency')),
             ],
           ),
           const SizedBox(height: 12),
           Row(
             children: [
-              Expanded(
-                child: _buildDetailItem(
-                  'Margin Level',
-                  marginLevel > 0 ? '${marginLevel.toStringAsFixed(1)}%' : '-',
-                ),
-              ),
+              Expanded(child: _buildDetailItem('Margin Level', marginLevel > 0 ? '${marginLevel.toStringAsFixed(1)}%' : '-')),
               Expanded(child: _buildDetailItem('Leverage', '1:$leverage')),
             ],
           ),
           const SizedBox(height: 12),
           Row(
             children: [
-              Expanded(
-                child: _buildDetailItem('Open Positions', '$openPositions'),
-              ),
+              Expanded(child: _buildDetailItem('Open Positions', '$openPositions')),
               Expanded(child: _buildDetailItem('Currency', currency)),
             ],
           ),
@@ -332,7 +318,7 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
     Map<String, int> pairCounts,
   ) {
     final sortedPairs = pairCounts.keys.toList()..sort();
-
+    
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -345,7 +331,7 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
             ),
           ],
         ),
-
+        
         // Pair filter chips
         if (_positionsLoaded && pairCounts.isNotEmpty) ...[
           const SizedBox(height: 12),
@@ -366,13 +352,10 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
                   });
                 },
                 child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 6,
-                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(
-                    color: isSelected
-                        ? AppColors.primaryWithOpacity(0.2)
+                    color: isSelected 
+                        ? AppColors.primaryWithOpacity(0.2) 
                         : AppColors.surface,
                     borderRadius: BorderRadius.circular(16),
                     border: Border.all(
@@ -385,31 +368,24 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
                       Text(
                         pair,
                         style: TextStyle(
-                          color: isSelected
-                              ? AppColors.primary
-                              : AppColors.textSecondary,
+                          color: isSelected ? AppColors.primary : AppColors.textSecondary,
                           fontSize: 12,
                           fontWeight: FontWeight.w500,
                         ),
                       ),
                       const SizedBox(width: 6),
                       Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 6,
-                          vertical: 2,
-                        ),
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
-                          color: isSelected
-                              ? AppColors.primary
+                          color: isSelected 
+                              ? AppColors.primary 
                               : AppColors.textSecondary.withOpacity(0.3),
                           borderRadius: BorderRadius.circular(10),
                         ),
                         child: Text(
                           '$count',
                           style: TextStyle(
-                            color: isSelected
-                                ? Colors.black
-                                : AppColors.textSecondary,
+                            color: isSelected ? Colors.black : AppColors.textSecondary,
                             fontSize: 10,
                             fontWeight: FontWeight.bold,
                           ),
@@ -422,9 +398,9 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
             }).toList(),
           ),
         ],
-
+        
         const SizedBox(height: 16),
-
+        
         if (!_positionsLoaded)
           Container(
             padding: const EdgeInsets.all(32),
@@ -459,11 +435,7 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
             child: const Center(
               child: Column(
                 children: [
-                  Icon(
-                    Icons.inbox_outlined,
-                    size: 48,
-                    color: AppColors.textSecondary,
-                  ),
+                  Icon(Icons.inbox_outlined, size: 48, color: AppColors.textSecondary),
                   SizedBox(height: 12),
                   Text('No open positions', style: AppTextStyles.body),
                 ],
@@ -480,11 +452,7 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
             child: const Center(
               child: Column(
                 children: [
-                  Icon(
-                    Icons.filter_list_off,
-                    size: 48,
-                    color: AppColors.textSecondary,
-                  ),
+                  Icon(Icons.filter_list_off, size: 48, color: AppColors.textSecondary),
                   SizedBox(height: 12),
                   Text('No positions match filter', style: AppTextStyles.body),
                 ],
@@ -514,48 +482,53 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
     final isBuy = type.toLowerCase() == 'buy';
     final totalProfit = profit + swap + commission;
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Header: Symbol + Type + Lots
-          Row(
-            children: [
-              Text(
-                symbol,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: isBuy ? AppColors.primary : AppColors.error,
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Text(
-                  type.toUpperCase(),
+    return GestureDetector(
+      onTap: () => _openPositionDetail(position),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header: Symbol + Type + Lots
+            Row(
+              children: [
+                Text(
+                  symbol,
                   style: const TextStyle(
                     color: Colors.white,
-                    fontSize: 11,
+                    fontSize: 18,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
-              ),
+                const SizedBox(width: 12),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: isBuy ? AppColors.primary : AppColors.error,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    type.toUpperCase(),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
               const Spacer(),
               Text(
                 '${lots.toStringAsFixed(2)} lots',
-                style: const TextStyle(color: Colors.white, fontSize: 14),
+                style: const TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: 14,
+                ),
               ),
             ],
           ),
@@ -566,31 +539,20 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
           Row(
             children: [
               Expanded(
-                child: _buildPriceItem('Open', openPrice.toStringAsFixed(2)),
+                child: _buildPriceItem('Open', openPrice.toStringAsFixed(5)),
               ),
               Expanded(
-                child: _buildPriceItem(
-                  'Current',
-                  currentPrice.toStringAsFixed(2),
-                ),
+                child: _buildPriceItem('Current', currentPrice.toStringAsFixed(5)),
               ),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    const Text(
-                      'P/L',
-                      style: TextStyle(
-                        color: AppColors.textSecondary,
-                        fontSize: 11,
-                      ),
-                    ),
+                    const Text('P/L', style: TextStyle(color: AppColors.textSecondary, fontSize: 11)),
                     Text(
                       '${totalProfit >= 0 ? '+' : ''}${totalProfit.toStringAsFixed(2)}',
                       style: TextStyle(
-                        color: totalProfit >= 0
-                            ? AppColors.primary
-                            : AppColors.error,
+                        color: totalProfit >= 0 ? AppColors.primary : AppColors.error,
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
                       ),
@@ -609,18 +571,14 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
           Row(
             children: [
               Expanded(
-                child: _buildPriceItem(
-                  'SL',
-                  sl > 0 ? sl.toStringAsFixed(2) : '-',
-                ),
+                child: _buildPriceItem('SL', sl > 0 ? sl.toStringAsFixed(5) : '-'),
               ),
               Expanded(
-                child: _buildPriceItem(
-                  'TP',
-                  tp > 0 ? tp.toStringAsFixed(2) : '-',
-                ),
+                child: _buildPriceItem('TP', tp > 0 ? tp.toStringAsFixed(5) : '-'),
               ),
-              Expanded(child: _buildPriceItem('Swap', swap.toStringAsFixed(2))),
+              Expanded(
+                child: _buildPriceItem('Swap', swap.toStringAsFixed(2)),
+              ),
             ],
           ),
 
@@ -631,22 +589,35 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
             children: [
               Text(
                 '#$ticket',
-                style: const TextStyle(
-                  color: AppColors.textMuted,
-                  fontSize: 11,
-                ),
+                style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
               ),
               const Spacer(),
+              const Icon(Icons.chevron_right, color: AppColors.textSecondary, size: 18),
+              const SizedBox(width: 4),
               Text(
                 openTime,
-                style: const TextStyle(
-                  color: AppColors.textMuted,
-                  fontSize: 11,
-                ),
+                style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
               ),
             ],
           ),
         ],
+      ),
+      ),
+    );
+  }
+
+  void _openPositionDetail(Map<String, dynamic> position) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => PositionDetailScreen(
+          position: position,
+          positionsNotifier: widget.positionsNotifier,
+          accounts: widget.accountsNotifier.value,
+          onClosePosition: widget.onClosePosition,
+          onModifyPosition: widget.onModifyPosition,
+          onRefreshAllPositions: widget.onRefreshAllPositions,
+        ),
       ),
     );
   }
@@ -655,11 +626,11 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        Text(label, style: const TextStyle(color: AppColors.textSecondary, fontSize: 11)),
         Text(
-          label,
-          style: const TextStyle(color: AppColors.textSecondary, fontSize: 11),
+          value,
+          style: const TextStyle(color: Colors.white, fontSize: 14),
         ),
-        Text(value, style: const TextStyle(color: Colors.white, fontSize: 14)),
       ],
     );
   }
@@ -712,10 +683,7 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
             fontWeight: FontWeight.bold,
           ),
         ),
-        Text(
-          currency,
-          style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
-        ),
+        Text(currency, style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
       ],
     );
   }
@@ -724,18 +692,11 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          label,
-          style: const TextStyle(color: AppColors.textSecondary, fontSize: 11),
-        ),
+        Text(label, style: const TextStyle(color: AppColors.textSecondary, fontSize: 11)),
         const SizedBox(height: 2),
         Text(
           value,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 15,
-            fontWeight: FontWeight.w500,
-          ),
+          style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w500),
         ),
       ],
     );

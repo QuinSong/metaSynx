@@ -172,6 +172,7 @@ class EAService {
 
   /// Close a position
   Future<void> closePosition(int ticket, int terminalIndex) async {
+    onLog?.call('Sending close_position command: ticket=$ticket to terminal $terminalIndex');
     await sendCommandToTerminal(terminalIndex, {
       'action': 'close_position',
       'ticket': ticket,
@@ -180,6 +181,7 @@ class EAService {
 
   /// Modify a position
   Future<void> modifyPosition(int ticket, int terminalIndex, {double? sl, double? tp}) async {
+    onLog?.call('Sending modify_position command: ticket=$ticket, SL=$sl, TP=$tp to terminal $terminalIndex');
     await sendCommandToTerminal(terminalIndex, {
       'action': 'modify_position',
       'ticket': ticket,

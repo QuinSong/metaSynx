@@ -191,21 +191,33 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _handleClosePosition(Map<String, dynamic> message) async {
-    final ticket = message['ticket'] as int;
-    final terminalIndex = message['terminalIndex'] as int;
+    final ticket = message['ticket'] as int?;
+    final terminalIndex = message['terminalIndex'] as int?;
     
-    _addLog('Closing position: $ticket');
+    if (ticket == null || terminalIndex == null) {
+      _addLog('Close position: missing ticket or terminalIndex');
+      return;
+    }
+    
+    _addLog('Closing position: ticket=$ticket on terminal $terminalIndex');
     await _eaService.closePosition(ticket, terminalIndex);
+    _addLog('Close command sent for ticket=$ticket');
   }
 
   Future<void> _handleModifyPosition(Map<String, dynamic> message) async {
-    final ticket = message['ticket'] as int;
-    final terminalIndex = message['terminalIndex'] as int;
+    final ticket = message['ticket'] as int?;
+    final terminalIndex = message['terminalIndex'] as int?;
     final sl = (message['sl'] as num?)?.toDouble();
     final tp = (message['tp'] as num?)?.toDouble();
     
-    _addLog('Modifying position: $ticket');
+    if (ticket == null || terminalIndex == null) {
+      _addLog('Modify position: missing ticket or terminalIndex');
+      return;
+    }
+    
+    _addLog('Modifying position: ticket=$ticket on terminal $terminalIndex, SL=$sl, TP=$tp');
     await _eaService.modifyPosition(ticket, terminalIndex, sl: sl, tp: tp);
+    _addLog('Modify command sent for ticket=$ticket');
   }
 
   void _regenerateRoom() async {
