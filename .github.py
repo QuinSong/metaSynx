@@ -2,7 +2,7 @@ import os
 import time
 
 
-msg = 'created new_order_screen'
+msg = 'created account_detail_screen'
 
 
 os.system('git add .')

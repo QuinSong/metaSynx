@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import '../core/config.dart';
 import '../core/theme.dart';
-import '../services/services.dart';
+import '../services/relay_connection.dart';
+import '../services/room_service.dart';
+import '../services/ea_service.dart';
 import '../components/components.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -20,7 +22,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _qrData;
   bool _mobileConnected = false;
   String? _mobileDeviceName;
-  final List<String> _logs = [];
+  List<String> _logs = [];
   List<Map<String, dynamic>> _accounts = [];
 
   @override
@@ -128,22 +130,28 @@ class _HomeScreenState extends State<HomeScreen> {
     final targetIndex = message['targetIndex'] as int?;
     
     if (targetIndex != null) {
+      _addLog('Requesting positions for terminal $targetIndex');
       await _eaService.requestPositions(targetIndex);
-      // Wait a bit for EA to respond, then read positions
-      await Future.delayed(const Duration(milliseconds: 500));
+      // Wait for EA to respond and write positions file
+      await Future.delayed(const Duration(milliseconds: 1000));
       final positions = await _eaService.getPositions(targetIndex);
+      // Add terminalIndex to each position
+      for (final pos in positions) {
+        pos['terminalIndex'] = targetIndex;
+      }
       _connection?.send({
         'action': 'positions_list',
         'targetIndex': targetIndex,
         'positions': positions,
       });
+      _addLog('Sent ${positions.length} positions for terminal $targetIndex');
     } else {
       // Get positions for all terminals
       final allPositions = <Map<String, dynamic>>[];
       for (final account in _accounts) {
         final index = account['index'] as int;
         await _eaService.requestPositions(index);
-        await Future.delayed(const Duration(milliseconds: 300));
+        await Future.delayed(const Duration(milliseconds: 1000));
         final positions = await _eaService.getPositions(index);
         for (final pos in positions) {
           pos['terminalIndex'] = index;
@@ -154,6 +162,7 @@ class _HomeScreenState extends State<HomeScreen> {
         'action': 'positions_list',
         'positions': allPositions,
       });
+      _addLog('Sent ${allPositions.length} total positions');
     }
   }
 

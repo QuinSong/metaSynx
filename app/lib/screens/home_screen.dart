@@ -7,7 +7,9 @@ import '../services/relay_connection.dart' as relay;
 import '../components/connection_indicator.dart';
 import '../components/connection_card.dart';
 import '../components/scan_button.dart';
-import 'screens.dart';
+import 'qr_scanner_screen.dart';
+import 'new_order_screen.dart';
+import 'account_detail_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -21,7 +23,10 @@ class _HomeScreenState extends State<HomeScreen> {
   relay.ConnectionState _connectionState = relay.ConnectionState.disconnected;
   bool _bridgeConnected = false;
   String? _roomId;
-  List<Map<String, dynamic>> _accounts = [];
+  final ValueNotifier<List<Map<String, dynamic>>> _accountsNotifier =
+      ValueNotifier<List<Map<String, dynamic>>>([]);
+  final ValueNotifier<List<Map<String, dynamic>>> _positionsNotifier =
+      ValueNotifier<List<Map<String, dynamic>>>([]);
   Timer? _refreshTimer;
 
   @override
@@ -110,9 +115,16 @@ class _HomeScreenState extends State<HomeScreen> {
       case 'accounts_list':
         final accounts = message['accounts'] as List?;
         if (accounts != null) {
-          setState(() {
-            _accounts = List<Map<String, dynamic>>.from(accounts);
-          });
+          _accountsNotifier.value = List<Map<String, dynamic>>.from(accounts);
+          // Trigger setState to update account count in UI
+          setState(() {});
+        }
+        break;
+
+      case 'positions_list':
+        final positions = message['positions'] as List?;
+        if (positions != null) {
+          _positionsNotifier.value = List<Map<String, dynamic>>.from(positions);
         }
         break;
 
@@ -141,12 +153,34 @@ class _HomeScreenState extends State<HomeScreen> {
     _connection.send({'action': 'get_accounts'});
   }
 
+  void _requestPositions(int targetIndex) {
+    _connection.send({
+      'action': 'get_positions',
+      'targetIndex': targetIndex,
+    });
+  }
+
+  void _openAccountDetail(Map<String, dynamic> account) {
+    final accountIndex = account['index'] as int;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => AccountDetailScreen(
+          initialAccount: account,
+          accountsNotifier: _accountsNotifier,
+          positionsNotifier: _positionsNotifier,
+          onRefreshPositions: () => _requestPositions(accountIndex),
+        ),
+      ),
+    );
+  }
+
   void _openNewOrder() {
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => NewOrderScreen(
-          accounts: _accounts,
+          accounts: _accountsNotifier.value,
           onPlaceOrder: _placeOrder,
         ),
       ),
@@ -183,7 +217,8 @@ class _HomeScreenState extends State<HomeScreen> {
       _connectionState = relay.ConnectionState.disconnected;
       _bridgeConnected = false;
       _roomId = null;
-      _accounts = [];
+      _accountsNotifier.value = [];
+      _positionsNotifier.value = [];
     });
   }
 
@@ -209,6 +244,8 @@ class _HomeScreenState extends State<HomeScreen> {
   void dispose() {
     _connection.disconnect();
     _stopAccountsRefresh();
+    _accountsNotifier.dispose();
+    _positionsNotifier.dispose();
     super.dispose();
   }
 
@@ -216,7 +253,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final showFab = _connectionState == relay.ConnectionState.connected &&
         _bridgeConnected &&
-        _accounts.isNotEmpty;
+        _accountsNotifier.value.isNotEmpty;
 
     return Scaffold(
       body: SafeArea(
@@ -237,17 +274,22 @@ class _HomeScreenState extends State<HomeScreen> {
               if (_connectionState == relay.ConnectionState.connected &&
                   _bridgeConnected) ...[
                 Text(
-                  'ACCOUNTS (${_accounts.length})',
+                  'ACCOUNTS (${_accountsNotifier.value.length})',
                   style: AppTextStyles.label,
                 ),
                 const SizedBox(height: 12),
                 Expanded(
-                  child: _accounts.isEmpty
+                  child: _accountsNotifier.value.isEmpty
                       ? _buildLoadingAccounts()
-                      : ListView.builder(
-                          itemCount: _accounts.length,
-                          itemBuilder: (context, index) =>
-                              _buildAccountCard(_accounts[index]),
+                      : ValueListenableBuilder<List<Map<String, dynamic>>>(
+                          valueListenable: _accountsNotifier,
+                          builder: (context, accounts, _) {
+                            return ListView.builder(
+                              itemCount: accounts.length,
+                              itemBuilder: (context, index) =>
+                                  _buildAccountCard(accounts[index]),
+                            );
+                          },
                         ),
                 ),
               ] else
@@ -309,56 +351,64 @@ class _HomeScreenState extends State<HomeScreen> {
     final name = account['name'] as String? ?? '';
     final currency = account['currency'] as String? ?? 'USD';
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Account number & name
-          Row(
-            children: [
-              Text(
-                accountNum,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              if (name.isNotEmpty) ...[
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    name,
-                    style: AppTextStyles.body,
-                    overflow: TextOverflow.ellipsis,
+    return GestureDetector(
+      onTap: () => _openAccountDetail(account),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Account number & name
+            Row(
+              children: [
+                Text(
+                  accountNum,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
                   ),
                 ),
+                if (name.isNotEmpty) ...[
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      name,
+                      style: AppTextStyles.body,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+                const Icon(
+                  Icons.chevron_right,
+                  color: AppColors.textSecondary,
+                  size: 20,
+                ),
               ],
-            ],
-          ),
-          const SizedBox(height: 12),
-          // Balance, Equity, P/L row
-          Row(
-            children: [
-              Expanded(
-                child: _buildStatColumn('Balance', balance, currency),
-              ),
-              Expanded(
-                child: _buildStatColumn('Equity', equity, currency),
-              ),
-              Expanded(
-                child: _buildPLColumn(profit, currency),
-              ),
-            ],
-          ),
-        ],
+            ),
+            const SizedBox(height: 12),
+            // Balance, Equity, P/L row
+            Row(
+              children: [
+                Expanded(
+                  child: _buildStatColumn('Balance', balance, currency),
+                ),
+                Expanded(
+                  child: _buildStatColumn('Equity', equity, currency),
+                ),
+                Expanded(
+                  child: _buildPLColumn(profit, currency),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -82,17 +82,25 @@ class EAService {
 
   /// Get positions for a specific terminal
   Future<List<Map<String, dynamic>>> getPositions(int terminalIndex) async {
-    if (_commonDataPath == null) return [];
+    if (_commonDataPath == null) {
+      onLog?.call('Cannot get positions: EA service not initialized');
+      return [];
+    }
 
     final filePath = '$_commonDataPath\\Files\\$_bridgeFolder\\positions_$terminalIndex.json';
     final file = File(filePath);
     
-    if (!await file.exists()) return [];
+    if (!await file.exists()) {
+      onLog?.call('Positions file not found: positions_$terminalIndex.json');
+      return [];
+    }
 
     try {
       final content = await file.readAsString();
       final data = jsonDecode(content) as Map<String, dynamic>;
-      return List<Map<String, dynamic>>.from(data['positions'] ?? []);
+      final positions = List<Map<String, dynamic>>.from(data['positions'] ?? []);
+      onLog?.call('Read ${positions.length} positions from terminal $terminalIndex');
+      return positions;
     } catch (e) {
       onLog?.call('Error reading positions: $e');
       return [];
