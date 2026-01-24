@@ -95,30 +95,24 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
     final symbol = widget.position['symbol'] as String;
     final type = widget.position['type'] as String;
     final magic = widget.position['magic'] as int?;
-    final lots = widget.position['lots'];
-    final openTime = widget.position['openTime'] as String?;
 
-    // Find positions with same symbol and type across ALL terminals
+    // Only match positions with the same non-zero magic number
+    // This ensures only positions opened together from the app are linked
+    if (magic == null || magic == 0) {
+      // No magic number - this position stands alone
+      return widget.positionsNotifier.value.where((p) {
+        return p['terminalIndex'] == widget.position['terminalIndex'] &&
+               p['ticket'] == widget.position['ticket'];
+      }).toList();
+    }
+
+    // Find positions with same magic number across ALL terminals
     return widget.positionsNotifier.value.where((p) {
       if (p['symbol'] != symbol) return false;
       if (p['type'] != type) return false;
       
-      // If magic numbers match and are non-zero, it's definitely the same order batch
       final posMagic = p['magic'] as int?;
-      if (magic != null && magic != 0 && posMagic == magic) return true;
-      
-      // Match by lots and approximate open time
-      if (p['lots'] == lots) {
-        // If open times are close (within a few seconds), consider it a match
-        final posOpenTime = p['openTime'] as String?;
-        if (openTime != null && posOpenTime != null && openTime.length >= 16 && posOpenTime.length >= 16) {
-          // Simple string comparison - orders placed together will have very similar times
-          if (openTime.substring(0, 16) == posOpenTime.substring(0, 16)) return true;
-        }
-        return true; // Same symbol, type, lots - likely same batch
-      }
-      
-      return false;
+      return posMagic == magic;
     }).toList();
   }
 
@@ -147,7 +141,7 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
     }
   }
 
-  void _closePositions() {
+  void _closePositions() async {
     if (_selectedTerminalIndices.isEmpty) {
       _showError('Please select at least one account');
       return;
@@ -155,29 +149,55 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
 
     setState(() => _isProcessing = true);
 
-    final matching = _findMatchingPositions();
-    int closedCount = 0;
+    // Get all positions to close
+    final positionsToClose = <Map<String, int>>[];
     
+    // First, try to find matching positions
+    final matching = _findMatchingPositions();
     for (final terminalIndex in _selectedTerminalIndices) {
       final pos = matching.where((p) => p['terminalIndex'] == terminalIndex).firstOrNull;
       if (pos != null) {
-        final ticket = pos['ticket'] as int;
-        widget.onClosePosition(ticket, terminalIndex);
-        closedCount++;
+        positionsToClose.add({
+          'ticket': pos['ticket'] as int,
+          'terminalIndex': terminalIndex,
+        });
+      }
+    }
+    
+    // If no matches found, use the original position
+    if (positionsToClose.isEmpty) {
+      final origTerminal = widget.position['terminalIndex'] as int;
+      if (_selectedTerminalIndices.contains(origTerminal)) {
+        positionsToClose.add({
+          'ticket': widget.position['ticket'] as int,
+          'terminalIndex': origTerminal,
+        });
       }
     }
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Closing $closedCount position(s)'),
-        backgroundColor: AppColors.primary,
-      ),
-    );
+    if (positionsToClose.isEmpty) {
+      _showError('No positions to close');
+      setState(() => _isProcessing = false);
+      return;
+    }
 
-    Navigator.pop(context);
+    // Send all close commands
+    for (final item in positionsToClose) {
+      widget.onClosePosition(item['ticket']!, item['terminalIndex']!);
+    }
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Closing ${positionsToClose.length} position(s)'),
+          backgroundColor: AppColors.primary,
+        ),
+      );
+      Navigator.pop(context);
+    }
   }
 
-  void _modifyPositions() {
+  void _modifyPositions() async {
     if (_selectedTerminalIndices.isEmpty) {
       _showError('Please select at least one account');
       return;
@@ -195,26 +215,52 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
 
     setState(() => _isProcessing = true);
 
+    // Get all positions to modify
+    final positionsToModify = <Map<String, int>>[];
+    
+    // First, try to find matching positions
     final matching = _findMatchingPositions();
-    int modifiedCount = 0;
-
     for (final terminalIndex in _selectedTerminalIndices) {
       final pos = matching.where((p) => p['terminalIndex'] == terminalIndex).firstOrNull;
       if (pos != null) {
-        final ticket = pos['ticket'] as int;
-        widget.onModifyPosition(ticket, terminalIndex, sl, tp);
-        modifiedCount++;
+        positionsToModify.add({
+          'ticket': pos['ticket'] as int,
+          'terminalIndex': terminalIndex,
+        });
+      }
+    }
+    
+    // If no matches found, use the original position
+    if (positionsToModify.isEmpty) {
+      final origTerminal = widget.position['terminalIndex'] as int;
+      if (_selectedTerminalIndices.contains(origTerminal)) {
+        positionsToModify.add({
+          'ticket': widget.position['ticket'] as int,
+          'terminalIndex': origTerminal,
+        });
       }
     }
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Modifying $modifiedCount position(s)'),
-        backgroundColor: AppColors.primary,
-      ),
-    );
+    if (positionsToModify.isEmpty) {
+      _showError('No positions to modify');
+      setState(() => _isProcessing = false);
+      return;
+    }
 
-    Navigator.pop(context);
+    // Send all modify commands
+    for (final item in positionsToModify) {
+      widget.onModifyPosition(item['ticket']!, item['terminalIndex']!, sl, tp);
+    }
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Modifying ${positionsToModify.length} position(s)'),
+          backgroundColor: AppColors.primary,
+        ),
+      );
+      Navigator.pop(context);
+    }
   }
 
   void _showError(String message) {

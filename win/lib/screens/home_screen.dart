@@ -130,12 +130,8 @@ class _HomeScreenState extends State<HomeScreen> {
     final targetIndex = message['targetIndex'] as int?;
     
     if (targetIndex != null) {
-      _addLog('Requesting positions for terminal $targetIndex');
-      await _eaService.requestPositions(targetIndex);
-      // Wait for EA to respond and write positions file
-      await Future.delayed(const Duration(milliseconds: 1000));
+      // Get positions for specific terminal - read directly from file
       final positions = await _eaService.getPositions(targetIndex);
-      // Add terminalIndex to each position
       for (final pos in positions) {
         pos['terminalIndex'] = targetIndex;
       }
@@ -147,17 +143,7 @@ class _HomeScreenState extends State<HomeScreen> {
       _addLog('Sent ${positions.length} positions for terminal $targetIndex');
     } else {
       // Get positions for all terminals
-      final allPositions = <Map<String, dynamic>>[];
-      for (final account in _accounts) {
-        final index = account['index'] as int;
-        await _eaService.requestPositions(index);
-        await Future.delayed(const Duration(milliseconds: 1000));
-        final positions = await _eaService.getPositions(index);
-        for (final pos in positions) {
-          pos['terminalIndex'] = index;
-          allPositions.add(pos);
-        }
-      }
+      final allPositions = await _eaService.getAllPositions();
       _connection?.send({
         'action': 'positions_list',
         'positions': allPositions,

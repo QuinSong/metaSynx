@@ -123,8 +123,18 @@ class _HomeScreenState extends State<HomeScreen> {
 
       case 'positions_list':
         final positions = message['positions'] as List?;
+        final targetIndex = message['targetIndex'] as int?;
         if (positions != null) {
-          _positionsNotifier.value = List<Map<String, dynamic>>.from(positions);
+          if (targetIndex != null) {
+            // Merge: replace positions for this terminal only, keep others
+            final currentPositions = List<Map<String, dynamic>>.from(_positionsNotifier.value);
+            currentPositions.removeWhere((p) => p['terminalIndex'] == targetIndex);
+            currentPositions.addAll(List<Map<String, dynamic>>.from(positions));
+            _positionsNotifier.value = currentPositions;
+          } else {
+            // Full replacement when getting all positions
+            _positionsNotifier.value = List<Map<String, dynamic>>.from(positions);
+          }
         }
         break;
 

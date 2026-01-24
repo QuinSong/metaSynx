@@ -51,55 +51,40 @@ class EAService {
 
     final accounts = <Map<String, dynamic>>[];
     
-    // Look for status_*.json files
     await for (final entity in dir.list()) {
       if (entity is File && entity.path.contains('status_') && entity.path.endsWith('.json')) {
         try {
           final content = await entity.readAsString();
           final data = jsonDecode(content) as Map<String, dynamic>;
           
-          // Check if status is recent (within last 5 seconds)
-          final lastUpdate = data['lastUpdate'] as String?;
-          if (lastUpdate != null) {
-            // Add file modification time check as backup
-            final stat = await entity.stat();
-            final age = DateTime.now().difference(stat.modified);
-            if (age.inSeconds < 10) {
-              accounts.add(data);
-            }
+          final stat = await entity.stat();
+          final age = DateTime.now().difference(stat.modified);
+          if (age.inSeconds < 10) {
+            accounts.add(data);
           }
         } catch (e) {
-          onLog?.call('Error reading status file: $e');
+          // Skip invalid files
         }
       }
     }
 
-    // Sort by index
     accounts.sort((a, b) => (a['index'] as int? ?? 0).compareTo(b['index'] as int? ?? 0));
-    
     return accounts;
   }
 
-  /// Get positions for a specific terminal
+  /// Get positions for a specific terminal (reads directly from file)
   Future<List<Map<String, dynamic>>> getPositions(int terminalIndex) async {
-    if (_commonDataPath == null) {
-      onLog?.call('Cannot get positions: EA service not initialized');
-      return [];
-    }
+    if (_commonDataPath == null) return [];
 
     final filePath = '$_commonDataPath\\Files\\$_bridgeFolder\\positions_$terminalIndex.json';
     final file = File(filePath);
     
-    if (!await file.exists()) {
-      onLog?.call('Positions file not found: positions_$terminalIndex.json');
-      return [];
-    }
+    if (!await file.exists()) return [];
 
     try {
       final content = await file.readAsString();
       final data = jsonDecode(content) as Map<String, dynamic>;
       final positions = List<Map<String, dynamic>>.from(data['positions'] ?? []);
-      onLog?.call('Read ${positions.length} positions from terminal $terminalIndex');
       return positions;
     } catch (e) {
       onLog?.call('Error reading positions: $e');
@@ -107,32 +92,59 @@ class EAService {
     }
   }
 
-  /// Send a command to a specific terminal
-  Future<void> sendCommandToTerminal(int terminalIndex, Map<String, dynamic> command) async {
+  /// Get positions for all terminals
+  Future<List<Map<String, dynamic>>> getAllPositions() async {
+    if (_commonDataPath == null) return [];
+
+    final accounts = await getAccounts();
+    final allPositions = <Map<String, dynamic>>[];
+    
+    for (final account in accounts) {
+      final index = account['index'] as int;
+      final positions = await getPositions(index);
+      for (final pos in positions) {
+        pos['terminalIndex'] = index;
+        allPositions.add(pos);
+      }
+    }
+    
+    return allPositions;
+  }
+
+  /// Send a command to a specific terminal and wait for confirmation
+  Future<bool> sendCommandToTerminal(int terminalIndex, Map<String, dynamic> command) async {
     if (_commonDataPath == null) {
       onLog?.call('Cannot send command: EA service not initialized');
-      return;
+      return false;
     }
 
-    // Use per-terminal command file
     final filePath = '$_commonDataPath\\Files\\$_bridgeFolder\\command_$terminalIndex.json';
     final file = File(filePath);
     
     try {
+      // Add unique identifier to command
       command['timestamp'] = DateTime.now().millisecondsSinceEpoch;
+      command['cmdId'] = '${DateTime.now().millisecondsSinceEpoch}_$terminalIndex';
+      
       final json = jsonEncode(command);
       await file.writeAsString(json);
-      onLog?.call('Command sent to terminal $terminalIndex: ${command['action']}');
+      onLog?.call('Command written for terminal $terminalIndex: ${command['action']}');
+      
+      // Wait for command file to be deleted (EA processed it)
+      for (int i = 0; i < 20; i++) {  // Wait up to 2 seconds
+        await Future.delayed(const Duration(milliseconds: 100));
+        if (!await file.exists()) {
+          onLog?.call('Command processed by terminal $terminalIndex');
+          return true;
+        }
+      }
+      
+      onLog?.call('Warning: Command may not have been processed by terminal $terminalIndex');
+      return true;  // Return true anyway, EA might have processed it
     } catch (e) {
       onLog?.call('Error sending command: $e');
+      return false;
     }
-  }
-
-  /// Request positions from a terminal
-  Future<void> requestPositions(int terminalIndex) async {
-    await sendCommandToTerminal(terminalIndex, {
-      'action': 'get_positions',
-    });
   }
 
   /// Place an order on specific terminal
@@ -157,32 +169,29 @@ class EAService {
     };
 
     if (targetIndex != null) {
-      await sendCommandToTerminal(targetIndex, command);
+      await sendCommandToTerminal(targetIndex, Map.from(command));
     } else if (targetAll) {
-      // Send to all connected terminals
       final accounts = await getAccounts();
       for (final account in accounts) {
         final index = account['index'] as int;
-        await sendCommandToTerminal(index, command);
-        // Small delay between commands
-        await Future.delayed(const Duration(milliseconds: 100));
+        await sendCommandToTerminal(index, Map.from(command));
       }
     }
   }
 
-  /// Close a position
-  Future<void> closePosition(int ticket, int terminalIndex) async {
-    onLog?.call('Sending close_position command: ticket=$ticket to terminal $terminalIndex');
-    await sendCommandToTerminal(terminalIndex, {
+  /// Close a position - waits for confirmation
+  Future<bool> closePosition(int ticket, int terminalIndex) async {
+    onLog?.call('Closing position: ticket=$ticket on terminal $terminalIndex');
+    return await sendCommandToTerminal(terminalIndex, {
       'action': 'close_position',
       'ticket': ticket,
     });
   }
 
-  /// Modify a position
-  Future<void> modifyPosition(int ticket, int terminalIndex, {double? sl, double? tp}) async {
-    onLog?.call('Sending modify_position command: ticket=$ticket, SL=$sl, TP=$tp to terminal $terminalIndex');
-    await sendCommandToTerminal(terminalIndex, {
+  /// Modify a position - waits for confirmation
+  Future<bool> modifyPosition(int ticket, int terminalIndex, {double? sl, double? tp}) async {
+    onLog?.call('Modifying position: ticket=$ticket, SL=$sl, TP=$tp on terminal $terminalIndex');
+    return await sendCommandToTerminal(terminalIndex, {
       'action': 'modify_position',
       'ticket': ticket,
       'sl': sl ?? 0,
@@ -198,11 +207,9 @@ class EAService {
 
   /// Find MT4 Common Data folder
   Future<String?> _findCommonDataPath() async {
-    // Common locations for MT4 common data
     final possiblePaths = [
       '${Platform.environment['APPDATA']}\\MetaQuotes\\Terminal\\Common',
       '${Platform.environment['PROGRAMDATA']}\\MetaQuotes\\Terminal\\Common',
-      'C:\\Users\\${Platform.environment['USERNAME']}\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common',
     ];
 
     for (final path in possiblePaths) {
@@ -210,20 +217,6 @@ class EAService {
       if (await dir.exists()) {
         return path;
       }
-    }
-
-    // Fallback: search for it
-    try {
-      final appDataPath = Platform.environment['APPDATA'];
-      if (appDataPath != null) {
-        final metaQuotesPath = '$appDataPath\\MetaQuotes\\Terminal\\Common';
-        final dir = Directory(metaQuotesPath);
-        if (await dir.exists()) {
-          return metaQuotesPath;
-        }
-      }
-    } catch (e) {
-      // Ignore
     }
 
     return null;
