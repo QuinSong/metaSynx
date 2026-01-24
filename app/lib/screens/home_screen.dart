@@ -195,6 +195,10 @@ class _HomeScreenState extends State<HomeScreen> {
     required double? sl,
     required List<int> accountIndices,
   }) {
+    // Generate unique magic number for this order batch
+    // Using timestamp to ensure uniqueness across orders
+    final magic = DateTime.now().millisecondsSinceEpoch % 2147483647;
+    
     for (final index in accountIndices) {
       _connection.send({
         'action': 'place_order',
@@ -204,6 +208,7 @@ class _HomeScreenState extends State<HomeScreen> {
         'tp': tp ?? 0,
         'sl': sl ?? 0,
         'targetIndex': index,
+        'magic': magic,
       });
     }
   }

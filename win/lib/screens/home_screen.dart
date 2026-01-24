@@ -174,8 +174,9 @@ class _HomeScreenState extends State<HomeScreen> {
     final tp = (message['tp'] as num?)?.toDouble();
     final targetIndex = message['targetIndex'] as int?;
     final targetAll = message['targetAll'] as bool? ?? false;
+    final magic = message['magic'] as int?;
 
-    _addLog('Order: $symbol $type $lots lots');
+    _addLog('Order: $symbol $type $lots lots (magic: $magic)');
 
     await _eaService.placeOrder(
       symbol: symbol,
@@ -185,6 +186,7 @@ class _HomeScreenState extends State<HomeScreen> {
       tp: tp,
       targetIndex: targetIndex,
       targetAll: targetAll,
+      magic: magic,
     );
   }
 

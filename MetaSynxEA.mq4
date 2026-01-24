@@ -286,9 +286,10 @@ void ProcessCommand(string jsonCommand)
       double lots = StringToDouble(ExtractJsonString(jsonCommand, "lots"));
       double sl = StringToDouble(ExtractJsonString(jsonCommand, "sl"));
       double tp = StringToDouble(ExtractJsonString(jsonCommand, "tp"));
+      int magic = (int)StringToInteger(ExtractJsonString(jsonCommand, "magic"));
       
-      Print("Placing order: ", symbol, " ", type, " ", lots, " lots, SL=", sl, " TP=", tp);
-      PlaceOrder(symbol, type, lots, sl, tp);
+      Print("Placing order: ", symbol, " ", type, " ", lots, " lots, SL=", sl, " TP=", tp, " Magic=", magic);
+      PlaceOrder(symbol, type, lots, sl, tp, magic);
    }
    else if(action == "close_position")
    {
@@ -357,7 +358,7 @@ void WritePositions()
 //+------------------------------------------------------------------+
 //| Place a new order                                                 |
 //+------------------------------------------------------------------+
-void PlaceOrder(string symbol, string type, double lots, double sl, double tp)
+void PlaceOrder(string symbol, string type, double lots, double sl, double tp, int magic)
 {
    int orderType;
    double price;
@@ -408,14 +409,14 @@ void PlaceOrder(string symbol, string type, double lots, double sl, double tp)
    if(sl > 0) sl = NormalizeDouble(sl, digits);
    if(tp > 0) tp = NormalizeDouble(tp, digits);
    
-   Print("Executing OrderSend: ", symbol, " ", orderType, " ", lots, " @ ", price, " SL=", sl, " TP=", tp);
+   Print("Executing OrderSend: ", symbol, " ", orderType, " ", lots, " @ ", price, " SL=", sl, " TP=", tp, " Magic=", magic);
    
-   int ticket = OrderSend(symbol, orderType, lots, price, 30, sl, tp, "MetaSynx", 12345, 0, arrowColor);
+   int ticket = OrderSend(symbol, orderType, lots, price, 30, sl, tp, "MetaSynx", magic, 0, arrowColor);
    
    if(ticket > 0)
    {
       WriteResponse(true, "Order placed successfully", ticket);
-      Print("Order placed successfully: ", symbol, " ", type, " ", lots, " lots, ticket: ", ticket);
+      Print("Order placed successfully: ", symbol, " ", type, " ", lots, " lots, ticket: ", ticket, " magic: ", magic);
    }
    else
    {

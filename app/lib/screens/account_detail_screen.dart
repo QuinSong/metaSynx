@@ -23,24 +23,53 @@ class AccountDetailScreen extends StatefulWidget {
 class _AccountDetailScreenState extends State<AccountDetailScreen> {
   Timer? _refreshTimer;
   late int _accountIndex;
+  bool _positionsLoaded = false;
+  Set<String> _selectedPairs = {};
+  Set<String> _allKnownPairs = {};
+  bool _filtersInitialized = false;
 
   @override
   void initState() {
     super.initState();
     _accountIndex = widget.initialAccount['index'] as int;
-    
+
+    // Listen for positions updates
+    widget.positionsNotifier.addListener(_onPositionsUpdated);
+
     // Request positions immediately
     widget.onRefreshPositions();
-    
+
     // Start periodic refresh
     _refreshTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       widget.onRefreshPositions();
     });
   }
 
+  void _onPositionsUpdated() {
+    final positions = _getAllPositionsForAccount();
+
+    // Initialize filters with all pairs selected on first load only
+    if (!_filtersInitialized && positions.isNotEmpty) {
+      final pairs = positions.map((p) => p['symbol'] as String? ?? '').toSet();
+      setState(() {
+        _selectedPairs = pairs;
+        _allKnownPairs.addAll(pairs);
+        _filtersInitialized = true;
+        _positionsLoaded = true;
+      });
+    } else if (!_positionsLoaded) {
+      Future.delayed(const Duration(milliseconds: 1500), () {
+        if (mounted && !_positionsLoaded) {
+          setState(() => _positionsLoaded = true);
+        }
+      });
+    }
+  }
+
   @override
   void dispose() {
     _refreshTimer?.cancel();
+    widget.positionsNotifier.removeListener(_onPositionsUpdated);
     super.dispose();
   }
 
@@ -54,11 +83,42 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
     }
   }
 
-  List<Map<String, dynamic>> _getPositionsForAccount() {
+  List<Map<String, dynamic>> _getAllPositionsForAccount() {
     return widget.positionsNotifier.value
         .where((p) => p['terminalIndex'] == _accountIndex)
-        .toList()
-      ..sort((a, b) => (a['symbol'] as String).compareTo(b['symbol'] as String));
+        .toList();
+  }
+
+  List<Map<String, dynamic>> _getFilteredPositions() {
+    final positions = _getAllPositionsForAccount()
+        .where((p) => _selectedPairs.contains(p['symbol'] as String? ?? ''))
+        .toList();
+
+    // Sort by symbol first, then by open time (most recent first)
+    positions.sort((a, b) {
+      final symbolA = a['symbol'] as String? ?? '';
+      final symbolB = b['symbol'] as String? ?? '';
+      final symbolCompare = symbolA.compareTo(symbolB);
+
+      if (symbolCompare != 0) return symbolCompare;
+
+      // Same symbol - sort by open time descending (most recent first)
+      final timeA = a['openTime'] as String? ?? '';
+      final timeB = b['openTime'] as String? ?? '';
+      return timeB.compareTo(timeA);
+    });
+
+    return positions;
+  }
+
+  Map<String, int> _getPairCounts() {
+    final positions = _getAllPositionsForAccount();
+    final counts = <String, int>{};
+    for (final pos in positions) {
+      final symbol = pos['symbol'] as String? ?? '';
+      counts[symbol] = (counts[symbol] ?? 0) + 1;
+    }
+    return counts;
   }
 
   @override
@@ -95,7 +155,9 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
           return ValueListenableBuilder<List<Map<String, dynamic>>>(
             valueListenable: widget.positionsNotifier,
             builder: (context, _, __) {
-              final positions = _getPositionsForAccount();
+              final allPositions = _getAllPositionsForAccount();
+              final filteredPositions = _getFilteredPositions();
+              final pairCounts = _getPairCounts();
               return SingleChildScrollView(
                 padding: const EdgeInsets.all(16),
                 child: Column(
@@ -103,7 +165,12 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
                   children: [
                     _buildAccountInfoCard(account),
                     const SizedBox(height: 24),
-                    _buildPositionsSection(positions),
+                    _buildPositionsSection(
+                      allPositions,
+                      filteredPositions,
+                      pairCounts,
+                    ),
+                    const SizedBox(height: 50),
                   ],
                 ),
               );
@@ -160,8 +227,7 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
                         fontWeight: FontWeight.bold,
                       ),
                     ),
-                    if (name.isNotEmpty)
-                      Text(name, style: AppTextStyles.body),
+                    if (name.isNotEmpty) Text(name, style: AppTextStyles.body),
                   ],
                 ),
               ),
@@ -220,21 +286,38 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
           // Details grid
           Row(
             children: [
-              Expanded(child: _buildDetailItem('Free Margin', '${freeMargin.toStringAsFixed(2)} $currency')),
-              Expanded(child: _buildDetailItem('Used Margin', '${margin.toStringAsFixed(2)} $currency')),
+              Expanded(
+                child: _buildDetailItem(
+                  'Free Margin',
+                  '${freeMargin.toStringAsFixed(2)} $currency',
+                ),
+              ),
+              Expanded(
+                child: _buildDetailItem(
+                  'Used Margin',
+                  '${margin.toStringAsFixed(2)} $currency',
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 12),
           Row(
             children: [
-              Expanded(child: _buildDetailItem('Margin Level', marginLevel > 0 ? '${marginLevel.toStringAsFixed(1)}%' : '-')),
+              Expanded(
+                child: _buildDetailItem(
+                  'Margin Level',
+                  marginLevel > 0 ? '${marginLevel.toStringAsFixed(1)}%' : '-',
+                ),
+              ),
               Expanded(child: _buildDetailItem('Leverage', '1:$leverage')),
             ],
           ),
           const SizedBox(height: 12),
           Row(
             children: [
-              Expanded(child: _buildDetailItem('Open Positions', '$openPositions')),
+              Expanded(
+                child: _buildDetailItem('Open Positions', '$openPositions'),
+              ),
               Expanded(child: _buildDetailItem('Currency', currency)),
             ],
           ),
@@ -243,16 +326,106 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
     );
   }
 
-  Widget _buildPositionsSection(List<Map<String, dynamic>> positions) {
+  Widget _buildPositionsSection(
+    List<Map<String, dynamic>> allPositions,
+    List<Map<String, dynamic>> filteredPositions,
+    Map<String, int> pairCounts,
+  ) {
+    final sortedPairs = pairCounts.keys.toList()..sort();
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'POSITIONS (${positions.length})',
-          style: AppTextStyles.label,
+        // Header row with title and pair chips
+        Row(
+          children: [
+            Text(
+              'POSITIONS${_positionsLoaded ? ' (${allPositions.length})' : ''}',
+              style: AppTextStyles.label,
+            ),
+          ],
         ),
-        const SizedBox(height: 12),
-        if (positions.isEmpty)
+
+        // Pair filter chips
+        if (_positionsLoaded && pairCounts.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: sortedPairs.map((pair) {
+              final count = pairCounts[pair] ?? 0;
+              final isSelected = _selectedPairs.contains(pair);
+              return GestureDetector(
+                onTap: () {
+                  setState(() {
+                    if (isSelected) {
+                      _selectedPairs.remove(pair);
+                    } else {
+                      _selectedPairs.add(pair);
+                    }
+                  });
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? AppColors.primaryWithOpacity(0.2)
+                        : AppColors.surface,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: isSelected ? AppColors.primary : AppColors.border,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        pair,
+                        style: TextStyle(
+                          color: isSelected
+                              ? AppColors.primary
+                              : AppColors.textSecondary,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: isSelected
+                              ? AppColors.primary
+                              : AppColors.textSecondary.withOpacity(0.3),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text(
+                          '$count',
+                          style: TextStyle(
+                            color: isSelected
+                                ? Colors.black
+                                : AppColors.textSecondary,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        ],
+
+        const SizedBox(height: 16),
+
+        if (!_positionsLoaded)
           Container(
             padding: const EdgeInsets.all(32),
             decoration: BoxDecoration(
@@ -262,15 +435,64 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
             child: const Center(
               child: Column(
                 children: [
-                  Icon(Icons.inbox_outlined, size: 48, color: AppColors.textSecondary),
+                  SizedBox(
+                    width: 32,
+                    height: 32,
+                    child: CircularProgressIndicator(
+                      color: AppColors.primary,
+                      strokeWidth: 2,
+                    ),
+                  ),
+                  SizedBox(height: 16),
+                  Text('Loading positions...', style: AppTextStyles.body),
+                ],
+              ),
+            ),
+          )
+        else if (allPositions.isEmpty)
+          Container(
+            padding: const EdgeInsets.all(32),
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Center(
+              child: Column(
+                children: [
+                  Icon(
+                    Icons.inbox_outlined,
+                    size: 48,
+                    color: AppColors.textSecondary,
+                  ),
                   SizedBox(height: 12),
                   Text('No open positions', style: AppTextStyles.body),
                 ],
               ),
             ),
           )
+        else if (filteredPositions.isEmpty)
+          Container(
+            padding: const EdgeInsets.all(32),
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Center(
+              child: Column(
+                children: [
+                  Icon(
+                    Icons.filter_list_off,
+                    size: 48,
+                    color: AppColors.textSecondary,
+                  ),
+                  SizedBox(height: 12),
+                  Text('No positions match filter', style: AppTextStyles.body),
+                ],
+              ),
+            ),
+          )
         else
-          ...positions.map((pos) => _buildPositionCard(pos)),
+          ...filteredPositions.map((pos) => _buildPositionCard(pos)),
       ],
     );
   }
@@ -333,10 +555,7 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
               const Spacer(),
               Text(
                 '${lots.toStringAsFixed(2)} lots',
-                style: const TextStyle(
-                  color: AppColors.textSecondary,
-                  fontSize: 14,
-                ),
+                style: const TextStyle(color: Colors.white, fontSize: 14),
               ),
             ],
           ),
@@ -347,20 +566,31 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
           Row(
             children: [
               Expanded(
-                child: _buildPriceItem('Open', openPrice.toStringAsFixed(5)),
+                child: _buildPriceItem('Open', openPrice.toStringAsFixed(2)),
               ),
               Expanded(
-                child: _buildPriceItem('Current', currentPrice.toStringAsFixed(5)),
+                child: _buildPriceItem(
+                  'Current',
+                  currentPrice.toStringAsFixed(2),
+                ),
               ),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    const Text('P/L', style: TextStyle(color: AppColors.textSecondary, fontSize: 11)),
+                    const Text(
+                      'P/L',
+                      style: TextStyle(
+                        color: AppColors.textSecondary,
+                        fontSize: 11,
+                      ),
+                    ),
                     Text(
                       '${totalProfit >= 0 ? '+' : ''}${totalProfit.toStringAsFixed(2)}',
                       style: TextStyle(
-                        color: totalProfit >= 0 ? AppColors.primary : AppColors.error,
+                        color: totalProfit >= 0
+                            ? AppColors.primary
+                            : AppColors.error,
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
                       ),
@@ -379,14 +609,18 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
           Row(
             children: [
               Expanded(
-                child: _buildPriceItem('SL', sl > 0 ? sl.toStringAsFixed(5) : '-'),
+                child: _buildPriceItem(
+                  'SL',
+                  sl > 0 ? sl.toStringAsFixed(2) : '-',
+                ),
               ),
               Expanded(
-                child: _buildPriceItem('TP', tp > 0 ? tp.toStringAsFixed(5) : '-'),
+                child: _buildPriceItem(
+                  'TP',
+                  tp > 0 ? tp.toStringAsFixed(2) : '-',
+                ),
               ),
-              Expanded(
-                child: _buildPriceItem('Swap', swap.toStringAsFixed(2)),
-              ),
+              Expanded(child: _buildPriceItem('Swap', swap.toStringAsFixed(2))),
             ],
           ),
 
@@ -397,12 +631,18 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
             children: [
               Text(
                 '#$ticket',
-                style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
+                style: const TextStyle(
+                  color: AppColors.textMuted,
+                  fontSize: 11,
+                ),
               ),
               const Spacer(),
               Text(
                 openTime,
-                style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
+                style: const TextStyle(
+                  color: AppColors.textMuted,
+                  fontSize: 11,
+                ),
               ),
             ],
           ),
@@ -415,11 +655,11 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: const TextStyle(color: AppColors.textSecondary, fontSize: 11)),
         Text(
-          value,
-          style: const TextStyle(color: Colors.white, fontSize: 14),
+          label,
+          style: const TextStyle(color: AppColors.textSecondary, fontSize: 11),
         ),
+        Text(value, style: const TextStyle(color: Colors.white, fontSize: 14)),
       ],
     );
   }
@@ -472,7 +712,10 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
             fontWeight: FontWeight.bold,
           ),
         ),
-        Text(currency, style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+        Text(
+          currency,
+          style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
+        ),
       ],
     );
   }
@@ -481,11 +724,18 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: const TextStyle(color: AppColors.textSecondary, fontSize: 11)),
+        Text(
+          label,
+          style: const TextStyle(color: AppColors.textSecondary, fontSize: 11),
+        ),
         const SizedBox(height: 2),
         Text(
           value,
-          style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w500),
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 15,
+            fontWeight: FontWeight.w500,
+          ),
         ),
       ],
     );

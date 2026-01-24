@@ -144,6 +144,7 @@ class EAService {
     double? tp,
     int? targetIndex,
     bool targetAll = false,
+    int? magic,
   }) async {
     final command = {
       'action': 'place_order',
@@ -152,6 +153,7 @@ class EAService {
       'lots': lots,
       'sl': sl ?? 0,
       'tp': tp ?? 0,
+      'magic': magic ?? DateTime.now().millisecondsSinceEpoch % 2147483647,
     };
 
     if (targetIndex != null) {
