@@ -29,8 +29,8 @@ class _HomeScreenState extends State<HomeScreen> {
       ValueNotifier<List<Map<String, dynamic>>>([]);
   final ValueNotifier<List<Map<String, dynamic>>> _positionsNotifier =
       ValueNotifier<List<Map<String, dynamic>>>([]);
-  final ValueNotifier<Map<String, dynamic>?> _chartDataNotifier =
-      ValueNotifier<Map<String, dynamic>?>(null);
+  final StreamController<Map<String, dynamic>> _chartDataController =
+      StreamController<Map<String, dynamic>>.broadcast();
   Map<String, String> _accountNames = {};
   String? _mainAccountNum;
   Map<String, double> _lotRatios = {};
@@ -230,9 +230,8 @@ class _HomeScreenState extends State<HomeScreen> {
         break;
 
       case 'chart_data':
-        // Forward chart data to the notifier for ChartScreen to consume
-        debugPrint('Received chart_data: type=${message['type']}, candles=${(message['candles'] as List?)?.length ?? 0}');
-        _chartDataNotifier.value = message;
+        // Forward chart data via stream
+        _chartDataController.add(message);
         break;
 
       case 'pong':
@@ -282,7 +281,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _subscribeChart(String symbol, String timeframe, int terminalIndex) {
-    debugPrint('Subscribing to chart: $symbol $timeframe terminal=$terminalIndex');
     _connection.send({
       'action': 'subscribe_chart',
       'symbol': symbol,
@@ -432,7 +430,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _stopAccountsRefresh();
     _accountsNotifier.dispose();
     _positionsNotifier.dispose();
-    _chartDataNotifier.dispose();
+    _chartDataController.close();
     super.dispose();
   }
 
@@ -564,7 +562,7 @@ class _HomeScreenState extends State<HomeScreen> {
           showPLPercent: _showPLPercent,
           confirmBeforeClose: _confirmBeforeClose,
           onConfirmBeforeCloseChanged: _updateConfirmBeforeClose,
-          chartDataNotifier: _chartDataNotifier,
+          chartDataStream: _chartDataController.stream,
           onSubscribeChart: _subscribeChart,
           onUnsubscribeChart: _unsubscribeChart,
           onRequestChartData: _requestChartData,

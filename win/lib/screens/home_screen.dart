@@ -91,7 +91,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final action = message['action'] as String?;
     
     // Only log non-polling actions
-    if (action != 'get_accounts' && action != 'get_positions' && action != 'ping') {
+    if (action != 'get_accounts' && action != 'get_positions' && action != 'ping' && action != 'get_chart_data') {
       _addLog('Received: $action');
     }
 

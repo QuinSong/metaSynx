@@ -17,8 +17,8 @@ class ChartScreen extends StatefulWidget {
   final bool showPLPercent;
   final bool confirmBeforeClose;
   final void Function(bool) onConfirmBeforeCloseChanged;
-  // MT4 chart data
-  final ValueNotifier<Map<String, dynamic>?>? chartDataNotifier;
+  // MT4 chart data - using Stream instead of ValueNotifier
+  final Stream<Map<String, dynamic>>? chartDataStream;
   final void Function(String symbol, String timeframe, int terminalIndex)? onSubscribeChart;
   final void Function(int terminalIndex)? onUnsubscribeChart;
   final void Function(int terminalIndex)? onRequestChartData;
@@ -37,7 +37,7 @@ class ChartScreen extends StatefulWidget {
     required this.showPLPercent,
     required this.confirmBeforeClose,
     required this.onConfirmBeforeCloseChanged,
-    this.chartDataNotifier,
+    this.chartDataStream,
     this.onSubscribeChart,
     this.onUnsubscribeChart,
     this.onRequestChartData,
@@ -56,6 +56,7 @@ class _ChartScreenState extends State<ChartScreen> {
   int? _selectedAccountIndex;
   final TextEditingController _symbolController = TextEditingController();
   Timer? _chartPollTimer;
+  StreamSubscription<Map<String, dynamic>>? _chartDataSubscription;
 
   final List<Map<String, String>> _timeframes = [
     {'label': '1m', 'value': '1'},
@@ -69,7 +70,7 @@ class _ChartScreenState extends State<ChartScreen> {
   ];
 
   bool get _useMT4Data => 
-      widget.chartDataNotifier != null && 
+      widget.chartDataStream != null && 
       widget.onSubscribeChart != null && 
       widget.onUnsubscribeChart != null &&
       widget.onRequestChartData != null;
@@ -91,9 +92,9 @@ class _ChartScreenState extends State<ChartScreen> {
     }
     _symbolController.text = _currentSymbol;
     
-    // Listen for chart data updates
+    // Listen for chart data updates via stream
     if (_useMT4Data) {
-      widget.chartDataNotifier!.addListener(_onChartDataReceived);
+      _chartDataSubscription = widget.chartDataStream!.listen(_onChartDataReceived);
     }
     
     _initWebView();
@@ -175,28 +176,22 @@ class _ChartScreenState extends State<ChartScreen> {
     _chartPollTimer = null;
   }
 
-  void _onChartDataReceived() {
-    final data = widget.chartDataNotifier?.value;
-    if (data == null) return;
-    
+  void _onChartDataReceived(Map<String, dynamic> data) {
     final type = data['type'] as String?;
-    debugPrint('Chart data received: type=$type');
     
-    if (type == 'history') {
-      // Initial historical data
+    if (type == 'history' && !_hasReceivedData) {
+      // Initial historical data - only process once
       final candles = data['candles'] as List?;
       if (candles != null && candles.isNotEmpty) {
         _hasReceivedData = true;
         final candlesJson = _candlesToJson(candles);
         _controller.runJavaScript('setChartData($candlesJson);');
         setState(() => _isLoading = false);
-        debugPrint('Chart history set: ${candles.length} candles');
       }
-    } else if (type == 'update') {
+    } else if (type == 'update' && _hasReceivedData) {
       // Live candle update
       final candle = data['candle'] as Map<String, dynamic>?;
-      debugPrint('Chart update: candle=$candle, hasReceivedData=$_hasReceivedData');
-      if (candle != null && _hasReceivedData) {
+      if (candle != null) {
         final candleJson = _candleToJson(candle);
         _controller.runJavaScript('updateCandle($candleJson);');
       }
@@ -606,13 +601,12 @@ class _ChartScreenState extends State<ChartScreen> {
     // Stop polling
     _stopChartPolling();
     
+    // Cancel stream subscription
+    _chartDataSubscription?.cancel();
+    
     // Unsubscribe from chart data when leaving screen
     if (_useMT4Data && _selectedAccountIndex != null) {
       widget.onUnsubscribeChart!(_selectedAccountIndex!);
-    }
-    
-    if (_useMT4Data) {
-      widget.chartDataNotifier!.removeListener(_onChartDataReceived);
     }
     
     _symbolController.dispose();
