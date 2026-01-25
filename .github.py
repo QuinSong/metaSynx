@@ -2,7 +2,7 @@ import os
 import time
 
 
-msg = 'update'
+msg = 'reverted one commit back due to mt4 candles, conflict with claude files'
 
 
 os.system('git add .')
