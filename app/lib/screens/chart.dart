@@ -10,7 +10,8 @@ class ChartScreen extends StatefulWidget {
   final List<Map<String, dynamic>> accounts;
   final String? initialSymbol;
   final void Function(int ticket, int terminalIndex) onClosePosition;
-  final void Function(int ticket, int terminalIndex, double? sl, double? tp) onModifyPosition;
+  final void Function(int ticket, int terminalIndex, double? sl, double? tp)
+  onModifyPosition;
   final Map<String, String> accountNames;
   final String? mainAccountNum;
   final bool includeCommissionSwap;
@@ -19,7 +20,8 @@ class ChartScreen extends StatefulWidget {
   final void Function(bool) onConfirmBeforeCloseChanged;
   // MT4 chart data
   final Stream<Map<String, dynamic>>? chartDataStream;
-  final void Function(String symbol, String timeframe, int terminalIndex)? onRequestChartData;
+  final void Function(String symbol, String timeframe, int terminalIndex)?
+  onRequestChartData;
 
   const ChartScreen({
     super.key,
@@ -65,19 +67,18 @@ class _ChartScreenState extends State<ChartScreen> {
     {'label': '1W', 'value': 'W'},
   ];
 
-  bool get _useMT4Data => 
-      widget.chartDataStream != null && 
-      widget.onRequestChartData != null;
+  bool get _useMT4Data =>
+      widget.chartDataStream != null && widget.onRequestChartData != null;
 
   @override
   void initState() {
     super.initState();
-    
+
     // Set first account as default
     if (widget.accounts.isNotEmpty) {
       _selectedAccountIndex = 0;
     }
-    
+
     // Set initial symbol
     if (widget.initialSymbol != null && widget.initialSymbol!.isNotEmpty) {
       _currentSymbol = widget.initialSymbol!;
@@ -85,12 +86,14 @@ class _ChartScreenState extends State<ChartScreen> {
       _currentSymbol = widget.positions.first['symbol'] as String? ?? 'EURUSD';
     }
     _symbolController.text = _currentSymbol;
-    
+
     // Listen for chart data updates via stream
     if (_useMT4Data) {
-      _chartDataSubscription = widget.chartDataStream!.listen(_onChartDataReceived);
+      _chartDataSubscription = widget.chartDataStream!.listen(
+        _onChartDataReceived,
+      );
     }
-    
+
     _initWebView();
   }
 
@@ -130,13 +133,17 @@ class _ChartScreenState extends State<ChartScreen> {
     // Chart is initialized, now start polling for data from MT4
     if (_useMT4Data && _selectedAccountIndex != null) {
       _hasReceivedData = false;
-      
+
       // Request initial chart data
-      widget.onRequestChartData!(_currentSymbol, _currentInterval, _selectedAccountIndex!);
-      
+      widget.onRequestChartData!(
+        _currentSymbol,
+        _currentInterval,
+        _selectedAccountIndex!,
+      );
+
       // Start polling for updates every 500ms
       _startChartPolling();
-      
+
       // Set a timeout - if no data after 5 seconds, show error
       Future.delayed(const Duration(seconds: 5), () {
         if (mounted && !_hasReceivedData && _isLoading) {
@@ -162,7 +169,11 @@ class _ChartScreenState extends State<ChartScreen> {
     _stopChartPolling();
     _chartPollTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
       if (_selectedAccountIndex != null && _useMT4Data) {
-        widget.onRequestChartData!(_currentSymbol, _currentInterval, _selectedAccountIndex!);
+        widget.onRequestChartData!(
+          _currentSymbol,
+          _currentInterval,
+          _selectedAccountIndex!,
+        );
       }
     });
   }
@@ -173,11 +184,18 @@ class _ChartScreenState extends State<ChartScreen> {
   }
 
   void _onChartDataReceived(Map<String, dynamic> data) {
+    // Verify data matches current request (ignore stale responses)
+    final dataSymbol = data['symbol'] as String?;
+    final dataTimeframe = data['timeframe']?.toString();
+
+    if (dataSymbol != null && dataSymbol != _currentSymbol) return;
+    if (dataTimeframe != null && dataTimeframe != _currentInterval) return;
+
     final candles = data['candles'] as List?;
     if (candles != null && candles.isNotEmpty) {
       final candlesJson = _candlesToJson(candles);
       _controller.runJavaScript('setChartData($candlesJson);');
-      
+
       if (!_hasReceivedData) {
         _hasReceivedData = true;
         setState(() => _isLoading = false);
@@ -207,14 +225,14 @@ class _ChartScreenState extends State<ChartScreen> {
   void _handlePositionTap(String ticketStr) {
     final ticket = int.tryParse(ticketStr);
     if (ticket == null) return;
-    
+
     final position = widget.positions.firstWhere(
       (p) => _parseInt(p['ticket']) == ticket,
       orElse: () => <String, dynamic>{},
     );
-    
+
     if (position.isEmpty) return;
-    
+
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -255,14 +273,16 @@ class _ChartScreenState extends State<ChartScreen> {
 
   List<Map<String, dynamic>> _getPositionsForSymbol() {
     return _getCurrentPositions().where((p) {
-      final symbolMatch = (p['symbol']?.toString().toUpperCase() ?? '') == _currentSymbol.toUpperCase();
+      final symbolMatch =
+          (p['symbol']?.toString().toUpperCase() ?? '') ==
+          _currentSymbol.toUpperCase();
       if (!symbolMatch) return false;
-      
+
       if (_selectedAccountIndex != null) {
         final terminalIndex = _parseInt(p['terminalIndex']);
         return terminalIndex == _selectedAccountIndex;
       }
-      
+
       return true;
     }).toList();
   }
@@ -278,10 +298,10 @@ class _ChartScreenState extends State<ChartScreen> {
   String _buildPositionLinesJs() {
     final positions = _getPositionsForSymbol();
     if (positions.isEmpty) return '';
-    
+
     final lines = StringBuffer();
     lines.writeln('positionPrices = [];');
-    
+
     for (int i = 0; i < positions.length; i++) {
       final pos = positions[i];
       final type = (pos['type']?.toString() ?? '').toLowerCase();
@@ -292,9 +312,11 @@ class _ChartScreenState extends State<ChartScreen> {
       final ticket = _parseInt(pos['ticket']);
       final isBuy = type == 'buy';
       final entryColor = isBuy ? '#00E676' : '#FF5252';
-      
-      lines.writeln('positionPrices.push({ ticket: $ticket, price: $openPrice });');
-      
+
+      lines.writeln(
+        'positionPrices.push({ ticket: $ticket, price: $openPrice });',
+      );
+
       // Entry line
       lines.writeln('''
         series.createPriceLine({
@@ -306,7 +328,7 @@ class _ChartScreenState extends State<ChartScreen> {
           title: '${isBuy ? "BUY" : "SELL"} ${lots.toStringAsFixed(2)}',
         });
       ''');
-      
+
       // SL line
       if (sl > 0) {
         lines.writeln('''
@@ -320,7 +342,7 @@ class _ChartScreenState extends State<ChartScreen> {
           });
         ''');
       }
-      
+
       // TP line
       if (tp > 0) {
         lines.writeln('''
@@ -335,7 +357,7 @@ class _ChartScreenState extends State<ChartScreen> {
         ''');
       }
     }
-    
+
     return lines.toString();
   }
 
@@ -433,6 +455,7 @@ class _ChartScreenState extends State<ChartScreen> {
         borderColor: 'rgba(255, 255, 255, 0.1)',
         timeVisible: true,
         secondsVisible: false,
+        rightOffset: 50,
       },
       handleScroll: true,
       handleScale: true,
@@ -500,22 +523,32 @@ class _ChartScreenState extends State<ChartScreen> {
     });
 
     const priceLabel = document.getElementById('price-label');
+    let priceLines = [];  // Track price lines to clear them
+    let chartInitialized = false;  // Only setData once
     
-    // Function to set initial chart data
+    // Function to set initial chart data (called once)
     function setChartData(candles) {
       if (!candles || candles.length === 0) return;
       
-      series.setData(candles);
-      document.getElementById('loading').style.display = 'none';
+      if (!chartInitialized) {
+        // First time - set all data and position lines
+        chartInitialized = true;
+        series.setData(candles);
+        document.getElementById('loading').style.display = 'none';
+        
+        // Add position lines only once
+        $positionLines
+        
+        chart.timeScale().fitContent();
+      } else {
+        // Subsequent updates - only update the last candle
+        const lastCandle = candles[candles.length - 1];
+        series.update(lastCandle);
+      }
       
       const lastCandle = candles[candles.length - 1];
       lastPrice = lastCandle.close;
       updatePriceLabel(lastCandle.close, lastCandle.open);
-      
-      // Add position lines after data is loaded
-      $positionLines
-      
-      chart.timeScale().fitContent();
     }
     
     // Function to update current candle
@@ -549,13 +582,13 @@ class _ChartScreenState extends State<ChartScreen> {
 
   void _loadChart() {
     _stopChartPolling();
-    
+
     setState(() {
       _currentSymbol = _symbolController.text.trim().toUpperCase();
       _isLoading = true;
       _hasReceivedData = false;
     });
-    
+
     _controller.loadHtmlString(_buildLightweightChartsHtml());
   }
 
@@ -572,9 +605,13 @@ class _ChartScreenState extends State<ChartScreen> {
   }
 
   int _getPositionCountForSymbol(String symbol) {
-    return _getPositionsForAccount().where((p) => 
-      (p['symbol']?.toString().toUpperCase() ?? '') == symbol.toUpperCase()
-    ).length;
+    return _getPositionsForAccount()
+        .where(
+          (p) =>
+              (p['symbol']?.toString().toUpperCase() ?? '') ==
+              symbol.toUpperCase(),
+        )
+        .length;
   }
 
   @override
@@ -611,14 +648,19 @@ class _ChartScreenState extends State<ChartScreen> {
                       textCapitalization: TextCapitalization.characters,
                       decoration: InputDecoration(
                         hintText: 'Symbol',
-                        hintStyle: TextStyle(color: AppColors.textSecondary.withOpacity(0.5)),
+                        hintStyle: TextStyle(
+                          color: AppColors.textSecondary.withOpacity(0.5),
+                        ),
                         filled: true,
                         fillColor: AppColors.surface,
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(8),
                           borderSide: BorderSide.none,
                         ),
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 0,
+                        ),
                         isDense: true,
                       ),
                       onSubmitted: (_) => _loadChart(),
@@ -638,7 +680,10 @@ class _ChartScreenState extends State<ChartScreen> {
                         borderRadius: BorderRadius.circular(8),
                       ),
                     ),
-                    child: const Text('GO', style: TextStyle(fontWeight: FontWeight.bold)),
+                    child: const Text(
+                      'GO',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
                   ),
                 ),
               ],
@@ -651,7 +696,10 @@ class _ChartScreenState extends State<ChartScreen> {
                 // Account selector row
                 if (widget.accounts.isNotEmpty)
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
                     color: AppColors.surface,
                     child: SingleChildScrollView(
                       scrollDirection: Axis.horizontal,
@@ -659,10 +707,12 @@ class _ChartScreenState extends State<ChartScreen> {
                         children: [
                           ...List.generate(widget.accounts.length, (index) {
                             final account = widget.accounts[index];
-                            final accountNum = account['account']?.toString() ?? '';
-                            final accountName = widget.accountNames[accountNum] ?? accountNum;
+                            final accountNum =
+                                account['account']?.toString() ?? '';
+                            final accountName =
+                                widget.accountNames[accountNum] ?? accountNum;
                             final isSelected = _selectedAccountIndex == index;
-                            
+
                             return Padding(
                               padding: const EdgeInsets.only(right: 6),
                               child: GestureDetector(
@@ -673,22 +723,31 @@ class _ChartScreenState extends State<ChartScreen> {
                                   _loadChart();
                                 },
                                 child: Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 6,
+                                  ),
                                   decoration: BoxDecoration(
                                     color: isSelected
                                         ? AppColors.primaryWithOpacity(0.2)
                                         : AppColors.background,
                                     borderRadius: BorderRadius.circular(6),
                                     border: Border.all(
-                                      color: isSelected ? AppColors.primary : AppColors.border,
+                                      color: isSelected
+                                          ? AppColors.primary
+                                          : AppColors.border,
                                     ),
                                   ),
                                   child: Text(
                                     accountName,
                                     style: TextStyle(
-                                      color: isSelected ? AppColors.primary : AppColors.textSecondary,
+                                      color: isSelected
+                                          ? AppColors.primary
+                                          : AppColors.textSecondary,
                                       fontSize: 12,
-                                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                      fontWeight: isSelected
+                                          ? FontWeight.bold
+                                          : FontWeight.normal,
                                     ),
                                   ),
                                 ),
@@ -699,10 +758,13 @@ class _ChartScreenState extends State<ChartScreen> {
                       ),
                     ),
                   ),
-                
+
                 // Timeframe selector row
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
                   color: AppColors.surface,
                   child: SingleChildScrollView(
                     scrollDirection: Axis.horizontal,
@@ -719,22 +781,31 @@ class _ChartScreenState extends State<ChartScreen> {
                               _loadChart();
                             },
                             child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 6,
+                              ),
                               decoration: BoxDecoration(
                                 color: isSelected
                                     ? AppColors.primary
                                     : AppColors.background,
                                 borderRadius: BorderRadius.circular(6),
                                 border: Border.all(
-                                  color: isSelected ? AppColors.primary : AppColors.border,
+                                  color: isSelected
+                                      ? AppColors.primary
+                                      : AppColors.border,
                                 ),
                               ),
                               child: Text(
                                 tf['label']!,
                                 style: TextStyle(
-                                  color: isSelected ? Colors.black : AppColors.textSecondary,
+                                  color: isSelected
+                                      ? Colors.black
+                                      : AppColors.textSecondary,
                                   fontSize: 12,
-                                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                  fontWeight: isSelected
+                                      ? FontWeight.bold
+                                      : FontWeight.normal,
                                 ),
                               ),
                             ),
@@ -744,17 +815,22 @@ class _ChartScreenState extends State<ChartScreen> {
                     ),
                   ),
                 ),
-                
+
                 // Quick symbol buttons from open positions
                 if (uniqueSymbols.isNotEmpty)
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
                     color: AppColors.background,
                     child: SingleChildScrollView(
                       scrollDirection: Axis.horizontal,
                       child: Row(
                         children: uniqueSymbols.map((symbol) {
-                          final isSelected = symbol.toUpperCase() == _currentSymbol.toUpperCase();
+                          final isSelected =
+                              symbol.toUpperCase() ==
+                              _currentSymbol.toUpperCase();
                           final posCount = _getPositionCountForSymbol(symbol);
                           return Padding(
                             padding: const EdgeInsets.only(right: 6),
@@ -764,14 +840,19 @@ class _ChartScreenState extends State<ChartScreen> {
                                 _loadChart();
                               },
                               child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 6,
+                                ),
                                 decoration: BoxDecoration(
-                                  color: isSelected 
-                                      ? AppColors.primaryWithOpacity(0.2) 
+                                  color: isSelected
+                                      ? AppColors.primaryWithOpacity(0.2)
                                       : AppColors.surface,
                                   borderRadius: BorderRadius.circular(6),
                                   border: Border.all(
-                                    color: isSelected ? AppColors.primary : AppColors.border,
+                                    color: isSelected
+                                        ? AppColors.primary
+                                        : AppColors.border,
                                   ),
                                 ),
                                 child: Row(
@@ -780,23 +861,36 @@ class _ChartScreenState extends State<ChartScreen> {
                                     Text(
                                       symbol,
                                       style: TextStyle(
-                                        color: isSelected ? AppColors.primary : AppColors.textSecondary,
+                                        color: isSelected
+                                            ? AppColors.primary
+                                            : AppColors.textSecondary,
                                         fontSize: 12,
-                                        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                        fontWeight: isSelected
+                                            ? FontWeight.bold
+                                            : FontWeight.normal,
                                       ),
                                     ),
                                     if (posCount > 0) ...[
                                       const SizedBox(width: 4),
                                       Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 4,
+                                          vertical: 1,
+                                        ),
                                         decoration: BoxDecoration(
-                                          color: isSelected ? AppColors.primary : AppColors.textMuted,
-                                          borderRadius: BorderRadius.circular(4),
+                                          color: isSelected
+                                              ? AppColors.primary
+                                              : AppColors.textMuted,
+                                          borderRadius: BorderRadius.circular(
+                                            4,
+                                          ),
                                         ),
                                         child: Text(
                                           '$posCount',
                                           style: TextStyle(
-                                            color: isSelected ? Colors.black : AppColors.surface,
+                                            color: isSelected
+                                                ? Colors.black
+                                                : AppColors.surface,
                                             fontSize: 9,
                                             fontWeight: FontWeight.bold,
                                           ),
@@ -812,7 +906,7 @@ class _ChartScreenState extends State<ChartScreen> {
                       ),
                     ),
                   ),
-                
+
                 // Chart
                 Expanded(
                   child: Stack(
@@ -822,7 +916,9 @@ class _ChartScreenState extends State<ChartScreen> {
                         Container(
                           color: AppColors.background,
                           child: const Center(
-                            child: CircularProgressIndicator(color: AppColors.primary),
+                            child: CircularProgressIndicator(
+                              color: AppColors.primary,
+                            ),
                           ),
                         ),
                     ],
