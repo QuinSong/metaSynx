@@ -96,7 +96,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _handleMessage(Map<String, dynamic> message) {
     final action = message['action'] as String?;
-    _addLog('Received: $action');
+    
+    // Only log non-polling actions
+    if (action != 'get_accounts' && action != 'get_positions' && action != 'ping') {
+      _addLog('Received: $action');
+    }
 
     switch (action) {
       case 'ping':
@@ -109,7 +113,6 @@ class _HomeScreenState extends State<HomeScreen> {
           'action': 'accounts_list',
           'accounts': _accounts,
         });
-        _addLog('Sent ${_accounts.length} accounts to mobile');
         break;
 
       case 'get_positions':
@@ -155,7 +158,6 @@ class _HomeScreenState extends State<HomeScreen> {
         'targetIndex': targetIndex,
         'positions': positions,
       });
-      _addLog('Sent ${positions.length} positions for terminal $targetIndex');
     } else {
       // Get positions for all terminals
       final allPositions = await _eaService.getAllPositions();
@@ -163,7 +165,6 @@ class _HomeScreenState extends State<HomeScreen> {
         'action': 'positions_list',
         'positions': allPositions,
       });
-      _addLog('Sent ${allPositions.length} total positions');
     }
   }
 

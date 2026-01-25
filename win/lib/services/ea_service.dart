@@ -10,7 +10,6 @@ class EAService {
   Timer? _pollTimer;
   Timer? _chartWatchTimer;
   String? _lastChartContent;
-  DateTime? _lastChartModified;
   
   Function(List<Map<String, dynamic>>)? onAccountsUpdated;
   Function(Map<String, dynamic>)? onChartDataReceived;
@@ -210,7 +209,6 @@ class EAService {
     onLog?.call('Subscribing to chart: $symbol $timeframe on terminal $terminalIndex');
     
     _lastChartContent = null;
-    _lastChartModified = null;
     
     // Send subscribe command to EA - this will write history data
     await sendCommandToTerminal(terminalIndex, {
@@ -279,23 +277,33 @@ class EAService {
   }
 
   /// Start watching chart file for updates
+  int _watcherTicks = 0;
+  
   void _startChartFileWatcher(int terminalIndex) {
     _stopChartFileWatcher();
     _lastChartContent = null;
-    _lastChartModified = null;
+    _watcherTicks = 0;
     
-    // Poll chart file every 200ms for updates
-    _chartWatchTimer = Timer.periodic(const Duration(milliseconds: 200), (_) {
+    onLog?.call('Starting chart file watcher for terminal $terminalIndex');
+    
+    // Poll chart file every 500ms for updates (matching EA timer)
+    _chartWatchTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
+      _watcherTicks++;
+      if (_watcherTicks <= 10 || _watcherTicks % 20 == 0) {
+        onLog?.call('Watcher tick #$_watcherTicks');
+      }
       _checkChartFile(terminalIndex);
     });
   }
 
   /// Stop watching chart file
   void _stopChartFileWatcher() {
+    if (_chartWatchTimer != null) {
+      onLog?.call('Stopping chart file watcher');
+    }
     _chartWatchTimer?.cancel();
     _chartWatchTimer = null;
     _lastChartContent = null;
-    _lastChartModified = null;
   }
 
   /// Check chart file for updates and forward to callback
@@ -308,29 +316,25 @@ class EAService {
     if (!await file.exists()) return;
     
     try {
-      // Check if file was modified since last read
-      final stat = await file.stat();
-      if (_lastChartModified != null && !stat.modified.isAfter(_lastChartModified!)) {
-        return; // File hasn't been modified
-      }
-      _lastChartModified = stat.modified;
-      
       final content = await file.readAsString();
       if (content.isEmpty) return;
       
-      // Skip if content is exactly the same (no price change)
-      if (content == _lastChartContent) return;
-      _lastChartContent = content;
-      
       final data = jsonDecode(content) as Map<String, dynamic>;
       
-      // Log update received
+      // For updates, always forward (don't compare content)
+      // For history, skip if same (shouldn't happen but just in case)
       if (data['type'] == 'update') {
-        onLog?.call('Chart update received');
+        // Only skip if candle data is exactly the same
+        final candleStr = data['candle']?.toString() ?? '';
+        if (candleStr == _lastChartContent) return;
+        _lastChartContent = candleStr;
+        
+        onChartDataReceived?.call(data);
+      } else if (data['type'] == 'history') {
+        if (content == _lastChartContent) return;
+        _lastChartContent = content;
+        onChartDataReceived?.call(data);
       }
-      
-      // Forward chart data to callback
-      onChartDataReceived?.call(data);
     } catch (e) {
       // Ignore file read errors (file might be being written)
     }
