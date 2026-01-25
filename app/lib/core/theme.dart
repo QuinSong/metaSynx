@@ -6,7 +6,7 @@ class AppColors {
   static const Color surface = Color(0xFF161B22);
   static const Color border = Color(0xFF30363D);
   static const Color textPrimary = Colors.white;
-  static const Color textSecondary = Color(0xFF6B7280);
+  static const Color textSecondary = Color(0xFF9CA3AF); // Brighter (was 0xFF6B7280)
   static const Color textMuted = Color(0xFF8B949E);
   static const Color error = Colors.red;
   static const Color warning = Colors.orange;

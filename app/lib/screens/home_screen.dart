@@ -4,13 +4,14 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/theme.dart';
 import '../services/relay_connection.dart' as relay;
-import '../components/connection_indicator.dart';
 import '../components/connection_card.dart';
 import '../components/scan_button.dart';
+import '../utils/formatters.dart';
 import 'qr_scanner_screen.dart';
 import 'new_order_screen.dart';
 import 'account_detail_screen.dart';
 import 'account_settings_screen.dart';
+import 'chart_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -29,24 +30,66 @@ class _HomeScreenState extends State<HomeScreen> {
   final ValueNotifier<List<Map<String, dynamic>>> _positionsNotifier =
       ValueNotifier<List<Map<String, dynamic>>>([]);
   Map<String, String> _accountNames = {};
+  String? _mainAccountNum;
+  Map<String, double> _lotRatios = {};
+  Map<String, String> _symbolSuffixes = {};
+  bool _includeCommissionSwap = false;
+  bool _showPLPercent = false;
+  bool _confirmBeforeClose = true;
   Timer? _refreshTimer;
 
   @override
   void initState() {
     super.initState();
-    _loadAccountNames();
+    _loadSettings();
     _setupConnection();
     _tryAutoConnect();
   }
 
-  Future<void> _loadAccountNames() async {
+  Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
+    
+    // Load account names
     final namesJson = prefs.getString('account_names');
     if (namesJson != null) {
-      setState(() {
-        _accountNames = Map<String, String>.from(jsonDecode(namesJson));
-      });
+      _accountNames = Map<String, String>.from(jsonDecode(namesJson));
     }
+    
+    // Load main account
+    final mainAccount = prefs.getString('main_account');
+    if (mainAccount != null && mainAccount.isNotEmpty) {
+      _mainAccountNum = mainAccount;
+    }
+    
+    // Load lot ratios
+    final ratiosJson = prefs.getString('lot_ratios');
+    if (ratiosJson != null) {
+      final decoded = jsonDecode(ratiosJson) as Map<String, dynamic>;
+      _lotRatios = decoded.map((k, v) => MapEntry(k, (v as num).toDouble()));
+    }
+    
+    // Load symbol suffixes
+    final suffixesJson = prefs.getString('symbol_suffixes');
+    if (suffixesJson != null) {
+      _symbolSuffixes = Map<String, String>.from(jsonDecode(suffixesJson));
+    }
+    
+    // Load include commission/swap setting
+    _includeCommissionSwap = prefs.getBool('include_commission_swap') ?? false;
+    
+    // Load show P/L % setting
+    _showPLPercent = prefs.getBool('show_pl_percent') ?? false;
+    
+    // Load confirm before close setting (default true)
+    _confirmBeforeClose = prefs.getBool('confirm_before_close') ?? true;
+    
+    setState(() {});
+  }
+
+  Future<void> _updateConfirmBeforeClose(bool value) async {
+    setState(() => _confirmBeforeClose = value);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('confirm_before_close', value);
   }
 
   String getAccountDisplayName(Map<String, dynamic> account) {
@@ -56,6 +99,17 @@ class _HomeScreenState extends State<HomeScreen> {
       return customName;
     }
     return accountNum;
+  }
+
+  double _getLotRatio(String accountNum) {
+    if (_mainAccountNum == null) return 1.0;
+    if (accountNum == _mainAccountNum) return 1.0;
+    return _lotRatios[accountNum] ?? 1.0;
+  }
+
+  String _getSymbolWithSuffix(String symbol, String accountNum) {
+    final suffix = _symbolSuffixes[accountNum] ?? '';
+    return '$symbol$suffix';
   }
 
   void _setupConnection() {
@@ -81,6 +135,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _refreshTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (_bridgeConnected) {
         _requestAccounts();
+        _requestAllPositions();
       }
     });
   }
@@ -231,6 +286,10 @@ class _HomeScreenState extends State<HomeScreen> {
           onClosePosition: _closePosition,
           onModifyPosition: _modifyPosition,
           accountNames: _accountNames,
+          includeCommissionSwap: _includeCommissionSwap,
+          showPLPercent: _showPLPercent,
+          confirmBeforeClose: _confirmBeforeClose,
+          onConfirmBeforeCloseChanged: _updateConfirmBeforeClose,
         ),
       ),
     );
@@ -242,6 +301,9 @@ class _HomeScreenState extends State<HomeScreen> {
       MaterialPageRoute(
         builder: (context) => NewOrderScreen(
           accounts: _accountsNotifier.value,
+          accountNames: _accountNames,
+          mainAccountNum: _mainAccountNum,
+          lotRatios: _lotRatios,
           onPlaceOrder: _placeOrder,
         ),
       ),
@@ -255,17 +317,39 @@ class _HomeScreenState extends State<HomeScreen> {
     required double? tp,
     required double? sl,
     required List<int> accountIndices,
+    required bool useRatios,
   }) {
     // Generate unique magic number for this order batch
     // Using timestamp to ensure uniqueness across orders
     final magic = DateTime.now().millisecondsSinceEpoch % 2147483647;
     
     for (final index in accountIndices) {
+      double adjustedLots = lots;
+      
+      if (useRatios) {
+        // Find account number for this index to get lot ratio
+        final account = _accountsNotifier.value.firstWhere(
+          (a) => a['index'] == index,
+          orElse: () => <String, dynamic>{},
+        );
+        final accountNum = account['account'] as String? ?? '';
+        final ratio = _getLotRatio(accountNum);
+        adjustedLots = double.parse((lots * ratio).toStringAsFixed(2));
+      }
+      
+      // Get account for symbol suffix
+      final account = _accountsNotifier.value.firstWhere(
+        (a) => a['index'] == index,
+        orElse: () => <String, dynamic>{},
+      );
+      final accountNum = account['account'] as String? ?? '';
+      final symbolWithSuffix = _getSymbolWithSuffix(symbol, accountNum);
+      
       _connection.send({
         'action': 'place_order',
-        'symbol': symbol,
+        'symbol': symbolWithSuffix,
         'type': type,
-        'lots': lots,
+        'lots': adjustedLots,
         'tp': tp ?? 0,
         'sl': sl ?? 0,
         'targetIndex': index,
@@ -329,7 +413,7 @@ class _HomeScreenState extends State<HomeScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _buildHeader(),
-              const SizedBox(height: 32),
+              const SizedBox(height: 10),
               ConnectionCard(
                 connectionState: _connectionState,
                 bridgeConnected: _bridgeConnected,
@@ -350,10 +434,19 @@ class _HomeScreenState extends State<HomeScreen> {
                       : ValueListenableBuilder<List<Map<String, dynamic>>>(
                           valueListenable: _accountsNotifier,
                           builder: (context, accounts, _) {
-                            return ListView.builder(
-                              itemCount: accounts.length,
-                              itemBuilder: (context, index) =>
-                                  _buildAccountCard(accounts[index]),
+                            return ValueListenableBuilder<List<Map<String, dynamic>>>(
+                              valueListenable: _positionsNotifier,
+                              builder: (context, positions, _) {
+                                return ListView(
+                                  children: [
+                                    // Show totals section if more than 1 account
+                                    if (accounts.length > 1)
+                                      _buildTotalsSection(accounts, positions),
+                                    // Account cards
+                                    ...accounts.map((account) => _buildAccountCard(account)),
+                                  ],
+                                );
+                              },
                             );
                           },
                         ),
@@ -390,17 +483,40 @@ class _HomeScreenState extends State<HomeScreen> {
         const Spacer(),
         if (_connectionState == relay.ConnectionState.connected &&
             _bridgeConnected &&
-            _accountsNotifier.value.isNotEmpty)
+            _accountsNotifier.value.isNotEmpty) ...[
           IconButton(
-            icon: const Icon(Icons.settings, color: AppColors.textSecondary),
+            icon: const Icon(Icons.candlestick_chart, color: AppColors.primary),
+            onPressed: _openChart,
+            tooltip: 'Chart',
+          ),
+          IconButton(
+            icon: const Icon(Icons.settings, color: AppColors.primary),
             onPressed: _openAccountSettings,
             tooltip: 'Account Settings',
           ),
-        ConnectionIndicator(
-          connectionState: _connectionState,
-          bridgeConnected: _bridgeConnected,
-        ),
+        ],
       ],
+    );
+  }
+
+  void _openChart() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ChartScreen(
+          positions: _positionsNotifier.value,
+          positionsNotifier: _positionsNotifier,
+          accounts: _accountsNotifier.value,
+          onClosePosition: _closePosition,
+          onModifyPosition: _modifyPosition,
+          onRefreshAllPositions: _requestAllPositions,
+          accountNames: _accountNames,
+          includeCommissionSwap: _includeCommissionSwap,
+          showPLPercent: _showPLPercent,
+          confirmBeforeClose: _confirmBeforeClose,
+          onConfirmBeforeCloseChanged: _updateConfirmBeforeClose,
+        ),
+      ),
     );
   }
 
@@ -411,9 +527,45 @@ class _HomeScreenState extends State<HomeScreen> {
         builder: (context) => AccountSettingsScreen(
           accounts: _accountsNotifier.value,
           accountNames: _accountNames,
+          mainAccountNum: _mainAccountNum,
+          lotRatios: _lotRatios,
+          symbolSuffixes: _symbolSuffixes,
+          includeCommissionSwap: _includeCommissionSwap,
+          showPLPercent: _showPLPercent,
+          confirmBeforeClose: _confirmBeforeClose,
           onNamesUpdated: (names) {
             setState(() {
               _accountNames = names;
+            });
+          },
+          onMainAccountUpdated: (mainAccount) {
+            setState(() {
+              _mainAccountNum = mainAccount;
+            });
+          },
+          onLotRatiosUpdated: (ratios) {
+            setState(() {
+              _lotRatios = ratios;
+            });
+          },
+          onSymbolSuffixesUpdated: (suffixes) {
+            setState(() {
+              _symbolSuffixes = suffixes;
+            });
+          },
+          onIncludeCommissionSwapUpdated: (value) {
+            setState(() {
+              _includeCommissionSwap = value;
+            });
+          },
+          onShowPLPercentUpdated: (value) {
+            setState(() {
+              _showPLPercent = value;
+            });
+          },
+          onConfirmBeforeCloseUpdated: (value) {
+            setState(() {
+              _confirmBeforeClose = value;
             });
           },
         ),
@@ -434,14 +586,155 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Widget _buildTotalsSection(List<Map<String, dynamic>> accounts, List<Map<String, dynamic>> positions) {
+    double totalBalance = 0;
+    double totalEquity = 0;
+    double totalProfit = 0;
+    
+    for (final account in accounts) {
+      totalBalance += (account['balance'] as num?)?.toDouble() ?? 0;
+      totalEquity += (account['equity'] as num?)?.toDouble() ?? 0;
+      
+      final accountIndex = account['index'] as int? ?? -1;
+      final accountPositions = positions.where((p) => p['terminalIndex'] == accountIndex);
+      
+      for (final pos in accountPositions) {
+        final rawProfit = (pos['profit'] as num?)?.toDouble() ?? 0;
+        if (_includeCommissionSwap) {
+          final swap = (pos['swap'] as num?)?.toDouble() ?? 0;
+          final commission = (pos['commission'] as num?)?.toDouble() ?? 0;
+          totalProfit += rawProfit + swap + commission;
+        } else {
+          totalProfit += rawProfit;
+        }
+      }
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            AppColors.primaryWithOpacity(0.15),
+            AppColors.primaryWithOpacity(0.05),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.primary.withOpacity(0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'TOTAL',
+            style: TextStyle(
+              color: AppColors.primary,
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 1,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Balance', style: TextStyle(color: AppColors.textSecondary, fontSize: 11)),
+                    const SizedBox(height: 2),
+                    Text(
+                      Formatters.formatCurrency(totalBalance),
+                      style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Equity', style: TextStyle(color: AppColors.textSecondary, fontSize: 11)),
+                    const SizedBox(height: 2),
+                    Text(
+                      Formatters.formatCurrency(totalEquity),
+                      style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          _includeCommissionSwap ? 'Net P/L' : 'P/L',
+                          style: const TextStyle(color: AppColors.textSecondary, fontSize: 11),
+                        ),
+                        if (_showPLPercent && totalBalance > 0) ...[
+                          const SizedBox(width: 8),
+                          Text(
+                            '${((totalProfit / totalBalance) * 100).toStringAsFixed(2)}%',
+                            style: TextStyle(
+                              color: totalProfit == 0 
+                                  ? Colors.white 
+                                  : (totalProfit > 0 ? AppColors.primary : AppColors.error),
+                              fontSize: 11,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      Formatters.formatCurrencyWithSign(totalProfit),
+                      style: TextStyle(
+                        color: totalProfit >= 0 ? AppColors.primary : AppColors.error,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildAccountCard(Map<String, dynamic> account) {
     final balance = (account['balance'] as num?)?.toDouble() ?? 0;
     final equity = (account['equity'] as num?)?.toDouble() ?? 0;
-    final profit = (account['profit'] as num?)?.toDouble() ?? 0;
     final accountNum = account['account'] as String? ?? 'Unknown';
+    final accountIndex = account['index'] as int? ?? -1;
     final currency = account['currency'] as String? ?? 'USD';
     final displayName = getAccountDisplayName(account);
     final hasCustomName = _accountNames[accountNum]?.isNotEmpty == true;
+    final isMainAccount = _mainAccountNum == accountNum;
+    
+    // Calculate P/L from positions based on setting
+    final accountPositions = _positionsNotifier.value.where(
+      (p) => p['terminalIndex'] == accountIndex
+    ).toList();
+    
+    double profit = 0;
+    for (final pos in accountPositions) {
+      final rawProfit = (pos['profit'] as num?)?.toDouble() ?? 0;
+      if (_includeCommissionSwap) {
+        final swap = (pos['swap'] as num?)?.toDouble() ?? 0;
+        final commission = (pos['commission'] as num?)?.toDouble() ?? 0;
+        profit += rawProfit + swap + commission;
+      } else {
+        profit += rawProfit;
+      }
+    }
 
     return GestureDetector(
       onTap: () => _openAccountDetail(account),
@@ -463,14 +756,38 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        displayName,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                        ),
-                        overflow: TextOverflow.ellipsis,
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              displayName,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          if (isMainAccount) ...[
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: AppColors.primary,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: const Text(
+                                'MAIN',
+                                style: TextStyle(
+                                  color: Colors.black,
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                       if (hasCustomName)
                         Text(
@@ -501,7 +818,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: _buildStatColumn('Equity', equity, currency),
                 ),
                 Expanded(
-                  child: _buildPLColumn(profit, currency),
+                  child: _buildPLColumn(profit, balance, currency, _includeCommissionSwap),
                 ),
               ],
             ),
@@ -518,22 +835,39 @@ class _HomeScreenState extends State<HomeScreen> {
         Text(label, style: const TextStyle(color: AppColors.textSecondary, fontSize: 11)),
         const SizedBox(height: 2),
         Text(
-          '${value.toStringAsFixed(2)}',
+          Formatters.formatCurrency(value),
           style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
         ),
       ],
     );
   }
 
-  Widget _buildPLColumn(double profit, String currency) {
+  Widget _buildPLColumn(double profit, double balance, String currency, bool isNetPL) {
     final isPositive = profit >= 0;
+    final plPercent = balance > 0 ? (profit / balance) * 100 : 0.0;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('P/L', style: TextStyle(color: AppColors.textSecondary, fontSize: 11)),
+        Row(
+          children: [
+            Text(isNetPL ? 'Net P/L' : 'P/L', style: const TextStyle(color: AppColors.textSecondary, fontSize: 11)),
+            if (_showPLPercent && balance > 0) ...[
+              const SizedBox(width: 8),
+              Text(
+                '${plPercent.toStringAsFixed(2)}%',
+                style: TextStyle(
+                  color: profit == 0 
+                      ? Colors.white 
+                      : (profit > 0 ? AppColors.primary : AppColors.error),
+                  fontSize: 11,
+                ),
+              ),
+            ],
+          ],
+        ),
         const SizedBox(height: 2),
         Text(
-          '${isPositive ? '+' : ''}${profit.toStringAsFixed(2)}',
+          Formatters.formatCurrencyWithSign(profit),
           style: TextStyle(
             color: isPositive ? AppColors.primary : AppColors.error,
             fontSize: 14,

@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
+import 'dart:convert';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../core/theme.dart';
+import '../utils/formatters.dart';
 import 'position_detail_screen.dart';
 
 class AccountDetailScreen extends StatefulWidget {
@@ -10,8 +13,13 @@ class AccountDetailScreen extends StatefulWidget {
   final VoidCallback onRefreshPositions;
   final VoidCallback onRefreshAllPositions;
   final void Function(int ticket, int terminalIndex) onClosePosition;
-  final void Function(int ticket, int terminalIndex, double? sl, double? tp) onModifyPosition;
+  final void Function(int ticket, int terminalIndex, double? sl, double? tp)
+  onModifyPosition;
   final Map<String, String> accountNames;
+  final bool includeCommissionSwap;
+  final bool showPLPercent;
+  final bool confirmBeforeClose;
+  final void Function(bool) onConfirmBeforeCloseChanged;
 
   const AccountDetailScreen({
     super.key,
@@ -23,6 +31,10 @@ class AccountDetailScreen extends StatefulWidget {
     required this.onClosePosition,
     required this.onModifyPosition,
     required this.accountNames,
+    required this.includeCommissionSwap,
+    required this.showPLPercent,
+    required this.confirmBeforeClose,
+    required this.onConfirmBeforeCloseChanged,
   });
 
   @override
@@ -35,7 +47,11 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
   bool _positionsLoaded = false;
   Set<String> _selectedPairs = {};
   Set<String> _allKnownPairs = {};
+  Set<String> _deselectedPairs = {}; // Track explicitly deselected pairs
   bool _filtersInitialized = false;
+  bool _accountDetailsExpanded = false;
+  bool _prefsLoaded = false;
+  Set<int> _expandedPositions = {}; // Track expanded position tickets
 
   String _getAccountDisplayName(String accountNum) {
     final customName = widget.accountNames[accountNum];
@@ -56,40 +72,94 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
   void initState() {
     super.initState();
     _accountIndex = widget.initialAccount['index'] as int;
-    
+
+    // Load saved filter preferences
+    _loadFilterPrefs();
+
     // Listen for positions updates
     widget.positionsNotifier.addListener(_onPositionsUpdated);
-    
+
     // Request positions immediately
     widget.onRefreshPositions();
-    
+
     // Start periodic refresh
     _refreshTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       widget.onRefreshPositions();
     });
   }
 
+  Future<void> _loadFilterPrefs() async {
+    final prefs = await SharedPreferences.getInstance();
+    final key = 'deselected_pairs_$_accountIndex';
+    final deselectedJson = prefs.getString(key);
+    if (deselectedJson != null) {
+      final List<dynamic> decoded = jsonDecode(deselectedJson);
+      _deselectedPairs = decoded.map((e) => e.toString()).toSet();
+    }
+    _prefsLoaded = true;
+    // Re-apply filters if positions already loaded
+    if (_filtersInitialized) {
+      setState(() {
+        _selectedPairs = _allKnownPairs.difference(_deselectedPairs);
+      });
+    }
+  }
+
+  Future<void> _saveFilterPrefs() async {
+    final prefs = await SharedPreferences.getInstance();
+    final key = 'deselected_pairs_$_accountIndex';
+    // Save deselected pairs (inverse of selected)
+    final deselected = _allKnownPairs.difference(_selectedPairs);
+    await prefs.setString(key, jsonEncode(deselected.toList()));
+  }
+
   void _onPositionsUpdated() {
     final positions = _getAllPositionsForAccount();
-    final currentPairs = positions.map((p) => p['symbol'] as String? ?? '').toSet();
-    
-    // Initialize filters with all pairs selected on first load
+    final currentPairs = positions
+        .map((p) => p['symbol'] as String? ?? '')
+        .toSet();
+
+    // Initialize filters with all pairs selected on first load (minus previously deselected)
     if (!_filtersInitialized && positions.isNotEmpty) {
       setState(() {
-        _selectedPairs = Set.from(currentPairs);
         _allKnownPairs = Set.from(currentPairs);
+        // Select all pairs except those previously deselected
+        _selectedPairs = _prefsLoaded
+            ? currentPairs.difference(_deselectedPairs)
+            : Set.from(currentPairs);
         _filtersInitialized = true;
         _positionsLoaded = true;
       });
     } else if (_filtersInitialized) {
-      // Auto-select any new pairs that appear
+      // Auto-select any new pairs that appear (only if not previously deselected)
       final newPairs = currentPairs.difference(_allKnownPairs);
       if (newPairs.isNotEmpty) {
         setState(() {
-          _selectedPairs.addAll(newPairs);
+          // Only auto-select new pairs that weren't previously deselected
+          final pairsToAdd = newPairs.difference(_deselectedPairs);
+          _selectedPairs.addAll(pairsToAdd);
           _allKnownPairs.addAll(newPairs);
         });
       }
+
+      // Check if selected pairs have any positions left
+      final selectedPairsWithPositions = _selectedPairs.intersection(
+        currentPairs,
+      );
+      if (selectedPairsWithPositions.isEmpty && currentPairs.isNotEmpty) {
+        // No positions left on selected pairs - select all remaining pairs
+        setState(() {
+          _selectedPairs = Set.from(currentPairs);
+          // Clear deselected pairs since we're resetting
+          _deselectedPairs.clear();
+        });
+        _saveFilterPrefs();
+      }
+
+      // Remove pairs from allKnownPairs that no longer have positions
+      _allKnownPairs = _allKnownPairs.intersection(currentPairs);
+      // Also clean up deselectedPairs
+      _deselectedPairs = _deselectedPairs.intersection(currentPairs);
     } else if (!_positionsLoaded) {
       Future.delayed(const Duration(milliseconds: 1500), () {
         if (mounted && !_positionsLoaded) {
@@ -126,21 +196,21 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
     final positions = _getAllPositionsForAccount()
         .where((p) => _selectedPairs.contains(p['symbol'] as String? ?? ''))
         .toList();
-    
+
     // Sort by symbol first, then by open time (most recent first)
     positions.sort((a, b) {
       final symbolA = a['symbol'] as String? ?? '';
       final symbolB = b['symbol'] as String? ?? '';
       final symbolCompare = symbolA.compareTo(symbolB);
-      
+
       if (symbolCompare != 0) return symbolCompare;
-      
+
       // Same symbol - sort by open time descending (most recent first)
       final timeA = a['openTime'] as String? ?? '';
       final timeB = b['openTime'] as String? ?? '';
       return timeB.compareTo(timeA);
     });
-    
+
     return positions;
   }
 
@@ -164,14 +234,16 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
           valueListenable: widget.accountsNotifier,
           builder: (context, _, __) {
             final account = _getCurrentAccount();
+            final accountNum = account?['account'] as String? ?? 'Account';
+            final displayName = _getAccountDisplayName(accountNum);
             return Text(
-              account?['account'] as String? ?? 'Account',
+              displayName,
               style: const TextStyle(color: Colors.white),
             );
           },
         ),
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          icon: const Icon(Icons.chevron_left, color: Colors.white),
           onPressed: () => Navigator.pop(context),
         ),
       ),
@@ -192,13 +264,17 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
               final filteredPositions = _getFilteredPositions();
               final pairCounts = _getPairCounts();
               return SingleChildScrollView(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     _buildAccountInfoCard(account),
                     const SizedBox(height: 24),
-                    _buildPositionsSection(allPositions, filteredPositions, pairCounts),
+                    _buildPositionsSection(
+                      allPositions,
+                      filteredPositions,
+                      pairCounts,
+                    ),
                   ],
                 ),
               );
@@ -214,127 +290,191 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
     final equity = (account['equity'] as num?)?.toDouble() ?? 0;
     final freeMargin = (account['freeMargin'] as num?)?.toDouble() ?? 0;
     final margin = (account['margin'] as num?)?.toDouble() ?? 0;
-    final profit = (account['profit'] as num?)?.toDouble() ?? 0;
     final marginLevel = (account['marginLevel'] as num?)?.toDouble() ?? 0;
     final accountNum = account['account'] as String? ?? 'Unknown';
     final broker = account['broker'] as String? ?? '';
+    final brokerName = account['name'] as String? ?? accountNum;
     final server = account['server'] as String? ?? '';
     final currency = account['currency'] as String? ?? 'USD';
     final leverage = account['leverage'] as int? ?? 0;
     final connected = account['connected'] as bool? ?? false;
-    final tradeAllowed = account['tradeAllowed'] as bool? ?? false;
     final openPositions = account['openPositions'] as int? ?? 0;
-    final displayName = _getAccountDisplayName(accountNum);
-    final hasCustomName = widget.accountNames[accountNum]?.isNotEmpty == true;
 
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: connected
-              ? AppColors.primaryWithOpacity(0.3)
-              : AppColors.error.withOpacity(0.3),
+    // Calculate P/L from positions based on setting
+    final accountPositions = widget.positionsNotifier.value
+        .where((p) => p['terminalIndex'] == _accountIndex)
+        .toList();
+
+    double profit = 0;
+    for (final pos in accountPositions) {
+      final rawProfit = (pos['profit'] as num?)?.toDouble() ?? 0;
+      if (widget.includeCommissionSwap) {
+        final swap = (pos['swap'] as num?)?.toDouble() ?? 0;
+        final commission = (pos['commission'] as num?)?.toDouble() ?? 0;
+        profit += rawProfit + swap + commission;
+      } else {
+        profit += rawProfit;
+      }
+    }
+
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          _accountDetailsExpanded = !_accountDetailsExpanded;
+        });
+      },
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              AppColors.primaryWithOpacity(0.15),
+              AppColors.primaryWithOpacity(0.05),
+            ],
+          ),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.primary.withOpacity(0.3)),
         ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Header
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      displayName,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 22,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    if (hasCustomName)
-                      Text(accountNum, style: AppTextStyles.body),
-                  ],
-                ),
-              ),
-              _buildStatusChip(connected, tradeAllowed),
-            ],
-          ),
-
-          const SizedBox(height: 8),
-          Text(broker, style: AppTextStyles.body),
-          Text(
-            'Server: $server',
-            style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
-          ),
-
-          const SizedBox(height: 20),
-          const Divider(color: AppColors.border),
-          const SizedBox(height: 16),
-
-          // Balance & Equity
-          Row(
-            children: [
-              Expanded(child: _buildMainStat('Balance', balance, currency)),
-              Expanded(child: _buildMainStat('Equity', equity, currency)),
-            ],
-          ),
-
-          const SizedBox(height: 20),
-
-          // Profit/Loss
-          Container(
-            padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
-            decoration: BoxDecoration(
-              color: profit >= 0
-                  ? AppColors.primary.withOpacity(0.1)
-                  : AppColors.error.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Balance & Equity row with chevron
+            Row(
               children: [
-                const Text('Floating P/L', style: AppTextStyles.body),
-                Text(
-                  '${profit >= 0 ? '+' : ''}${profit.toStringAsFixed(2)} $currency',
-                  style: TextStyle(
-                    color: profit >= 0 ? AppColors.primary : AppColors.error,
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                  ),
+                Expanded(child: _buildMainStat('Balance', balance, currency)),
+                Expanded(child: _buildMainStat('Equity', equity, currency)),
+                Icon(
+                  _accountDetailsExpanded
+                      ? Icons.expand_less
+                      : Icons.expand_more,
+                  color: AppColors.textSecondary,
                 ),
               ],
             ),
-          ),
 
-          const SizedBox(height: 20),
+            const SizedBox(height: 16),
 
-          // Details grid
-          Row(
-            children: [
-              Expanded(child: _buildDetailItem('Free Margin', '${freeMargin.toStringAsFixed(2)} $currency')),
-              Expanded(child: _buildDetailItem('Used Margin', '${margin.toStringAsFixed(2)} $currency')),
+            // Profit/Loss
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+              decoration: BoxDecoration(
+                color: profit >= 0
+                    ? AppColors.primary.withOpacity(0.1)
+                    : AppColors.error.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    widget.includeCommissionSwap
+                        ? 'Net Floating P/L'
+                        : 'Floating P/L',
+                    style: AppTextStyles.body,
+                  ),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(
+                        '${Formatters.formatCurrencyWithSign(profit)} $currency',
+                        style: TextStyle(
+                          color: profit >= 0
+                              ? AppColors.primary
+                              : AppColors.error,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      if (widget.showPLPercent && balance > 0) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          '${((profit / balance) * 100).toStringAsFixed(2)}%',
+                          style: TextStyle(
+                            color: profit == 0
+                                ? Colors.white
+                                : (profit > 0
+                                      ? AppColors.primary
+                                      : AppColors.error),
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ],
+              ),
+            ),
+
+            // Expanded details
+            if (_accountDetailsExpanded) ...[
+              const SizedBox(height: 20),
+              const Divider(color: AppColors.border),
+              const SizedBox(height: 16),
+
+              // Account number and name
+              Row(
+                children: [
+                  Expanded(
+                    child: _buildDetailItem('Account Number', accountNum),
+                  ),
+                  Expanded(child: _buildDetailItem('Account Name', brokerName)),
+                ],
+              ),
+              const SizedBox(height: 12),
+              _buildDetailItem('Broker', broker),
+              const SizedBox(height: 12),
+              _buildDetailItem('Server', server),
+
+              const SizedBox(height: 16),
+              const Divider(color: AppColors.border),
+              const SizedBox(height: 16),
+
+              // Details grid
+              Row(
+                children: [
+                  Expanded(
+                    child: _buildDetailItem(
+                      'Free Margin',
+                      '${Formatters.formatCurrency(freeMargin)} $currency',
+                    ),
+                  ),
+                  Expanded(
+                    child: _buildDetailItem(
+                      'Used Margin',
+                      '${Formatters.formatCurrency(margin)} $currency',
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: _buildDetailItem(
+                      'Margin Level',
+                      marginLevel > 0
+                          ? '${marginLevel.toStringAsFixed(1)}%'
+                          : '-',
+                    ),
+                  ),
+                  Expanded(child: _buildDetailItem('Leverage', '1:$leverage')),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: _buildDetailItem('Open Positions', '$openPositions'),
+                  ),
+                  Expanded(child: _buildDetailItem('Currency', currency)),
+                ],
+              ),
             ],
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(child: _buildDetailItem('Margin Level', marginLevel > 0 ? '${marginLevel.toStringAsFixed(1)}%' : '-')),
-              Expanded(child: _buildDetailItem('Leverage', '1:$leverage')),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(child: _buildDetailItem('Open Positions', '$openPositions')),
-              Expanded(child: _buildDetailItem('Currency', currency)),
-            ],
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -345,7 +485,7 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
     Map<String, int> pairCounts,
   ) {
     final sortedPairs = pairCounts.keys.toList()..sort();
-    
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -358,7 +498,7 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
             ),
           ],
         ),
-        
+
         // Pair filter chips
         if (_positionsLoaded && pairCounts.isNotEmpty) ...[
           const SizedBox(height: 12),
@@ -373,16 +513,22 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
                   setState(() {
                     if (isSelected) {
                       _selectedPairs.remove(pair);
+                      _deselectedPairs.add(pair);
                     } else {
                       _selectedPairs.add(pair);
+                      _deselectedPairs.remove(pair);
                     }
                   });
+                  _saveFilterPrefs();
                 },
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
                   decoration: BoxDecoration(
-                    color: isSelected 
-                        ? AppColors.primaryWithOpacity(0.2) 
+                    color: isSelected
+                        ? AppColors.primaryWithOpacity(0.2)
                         : AppColors.surface,
                     borderRadius: BorderRadius.circular(16),
                     border: Border.all(
@@ -395,24 +541,31 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
                       Text(
                         pair,
                         style: TextStyle(
-                          color: isSelected ? AppColors.primary : AppColors.textSecondary,
+                          color: isSelected
+                              ? AppColors.primary
+                              : AppColors.textSecondary,
                           fontSize: 12,
                           fontWeight: FontWeight.w500,
                         ),
                       ),
                       const SizedBox(width: 6),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
                         decoration: BoxDecoration(
-                          color: isSelected 
-                              ? AppColors.primary 
+                          color: isSelected
+                              ? AppColors.primary
                               : AppColors.textSecondary.withOpacity(0.3),
                           borderRadius: BorderRadius.circular(10),
                         ),
                         child: Text(
                           '$count',
                           style: TextStyle(
-                            color: isSelected ? Colors.black : AppColors.textSecondary,
+                            color: isSelected
+                                ? Colors.black
+                                : AppColors.textSecondary,
                             fontSize: 10,
                             fontWeight: FontWeight.bold,
                           ),
@@ -425,9 +578,9 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
             }).toList(),
           ),
         ],
-        
+
         const SizedBox(height: 16),
-        
+
         if (!_positionsLoaded)
           Container(
             padding: const EdgeInsets.all(32),
@@ -462,7 +615,11 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
             child: const Center(
               child: Column(
                 children: [
-                  Icon(Icons.inbox_outlined, size: 48, color: AppColors.textSecondary),
+                  Icon(
+                    Icons.inbox_outlined,
+                    size: 48,
+                    color: AppColors.textSecondary,
+                  ),
                   SizedBox(height: 12),
                   Text('No open positions', style: AppTextStyles.body),
                 ],
@@ -479,7 +636,11 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
             child: const Center(
               child: Column(
                 children: [
-                  Icon(Icons.filter_list_off, size: 48, color: AppColors.textSecondary),
+                  Icon(
+                    Icons.filter_list_off,
+                    size: 48,
+                    color: AppColors.textSecondary,
+                  ),
                   SizedBox(height: 12),
                   Text('No positions match filter', style: AppTextStyles.body),
                 ],
@@ -507,129 +668,227 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
     final openTime = position['openTime'] as String? ?? '';
 
     final isBuy = type.toLowerCase() == 'buy';
-    final totalProfit = profit + swap + commission;
+    final displayProfit = widget.includeCommissionSwap
+        ? profit + swap + commission
+        : profit;
     final digits = _detectDigits(openPrice);
 
-    return GestureDetector(
-      onTap: () => _openPositionDetail(position),
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 12),
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppColors.border),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Header: Symbol + Type + Lots
-            Row(
-              children: [
-                Text(
-                  symbol,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: isBuy ? AppColors.primary : AppColors.error,
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Text(
-                    type.toUpperCase(),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-              const Spacer(),
-              Text(
-                '${lots.toStringAsFixed(2)} lots',
-                style: const TextStyle(
-                  color: AppColors.textSecondary,
-                  fontSize: 14,
-                ),
-              ),
-            ],
-          ),
+    // Get account balance for P/L %
+    final account = _getCurrentAccount();
+    final balance = (account?['balance'] as num?)?.toDouble() ?? 0;
+    final plPercent = balance > 0 ? (displayProfit / balance) * 100 : 0.0;
 
-          const SizedBox(height: 12),
+    final isExpanded = _expandedPositions.contains(ticket);
 
-          // Prices row
-          Row(
-            children: [
-              Expanded(
-                child: _buildPriceItem('Open', openPrice.toStringAsFixed(digits)),
-              ),
-              Expanded(
-                child: _buildPriceItem('Current', currentPrice.toStringAsFixed(digits)),
-              ),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    const Text('P/L', style: TextStyle(color: AppColors.textSecondary, fontSize: 11)),
-                    Text(
-                      '${totalProfit >= 0 ? '+' : ''}${totalProfit.toStringAsFixed(2)}',
-                      style: TextStyle(
-                        color: totalProfit >= 0 ? AppColors.primary : AppColors.error,
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 12),
-          const Divider(color: AppColors.border, height: 1),
-          const SizedBox(height: 12),
-
-          // SL/TP row
-          Row(
-            children: [
-              Expanded(
-                child: _buildPriceItem('SL', sl > 0 ? sl.toStringAsFixed(digits) : '-'),
-              ),
-              Expanded(
-                child: _buildPriceItem('TP', tp > 0 ? tp.toStringAsFixed(digits) : '-'),
-              ),
-              Expanded(
-                child: _buildPriceItem('Swap', swap.toStringAsFixed(2)),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 8),
-
-          // Ticket & Time
-          Row(
-            children: [
-              Text(
-                '#$ticket',
-                style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
-              ),
-              const Spacer(),
-              const Icon(Icons.chevron_right, color: AppColors.textSecondary, size: 18),
-              const SizedBox(width: 4),
-              Text(
-                openTime,
-                style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
-              ),
-            ],
-          ),
-        ],
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border),
       ),
+      child: IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Left side - tap to expand/collapse (covers full height)
+            Expanded(
+              flex: 3,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () {
+                  setState(() {
+                    if (isExpanded) {
+                      _expandedPositions.remove(ticket);
+                    } else {
+                      _expandedPositions.add(ticket);
+                    }
+                  });
+                },
+                child: Padding(
+                  padding: const EdgeInsets.only(left: 16, top: 16, bottom: 16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Header left: Symbol + Type
+                      Row(
+                        children: [
+                          Text(
+                            symbol,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: isBuy
+                                  ? AppColors.primary
+                                  : AppColors.error,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              type.toUpperCase(),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      // Prices left: Open + Current
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _buildPriceItem(
+                              'Open',
+                              openPrice.toStringAsFixed(digits),
+                            ),
+                          ),
+                          Expanded(
+                            child: _buildPriceItem(
+                              'Current',
+                              currentPrice.toStringAsFixed(digits),
+                            ),
+                          ),
+                        ],
+                      ),
+                      // Expanded content
+                      if (isExpanded) ...[
+                        const SizedBox(height: 12),
+                        const Divider(color: AppColors.border, height: 1),
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _buildPriceItem(
+                                'SL',
+                                sl > 0 ? sl.toStringAsFixed(digits) : '-',
+                              ),
+                            ),
+                            Expanded(
+                              child: _buildPriceItem(
+                                'TP',
+                                tp > 0 ? tp.toStringAsFixed(digits) : '-',
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            // Right side - tap to go to detail (covers full height)
+            Expanded(
+              flex: 2,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => _openPositionDetail(position),
+                child: Padding(
+                  padding: const EdgeInsets.only(
+                    right: 16,
+                    top: 16,
+                    bottom: 16,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      // Header right: Lots + Chevron
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          Text(
+                            '${lots.toStringAsFixed(2)} lots',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          const Icon(
+                            Icons.chevron_right,
+                            color: AppColors.textSecondary,
+                            size: 22,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      // P/L section
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          Text(
+                            widget.includeCommissionSwap ? 'Net P/L' : 'P/L',
+                            style: const TextStyle(
+                              color: AppColors.textSecondary,
+                              fontSize: 11,
+                            ),
+                          ),
+                          if (widget.showPLPercent && balance > 0) ...[
+                            const SizedBox(width: 8),
+                            Text(
+                              '${plPercent.toStringAsFixed(2)}%',
+                              style: TextStyle(
+                                color: displayProfit == 0
+                                    ? Colors.white
+                                    : (displayProfit > 0
+                                          ? AppColors.primary
+                                          : AppColors.error),
+                                fontSize: 11,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                      Text(
+                        Formatters.formatCurrencyWithSign(displayProfit),
+                        style: TextStyle(
+                          color: displayProfit >= 0
+                              ? AppColors.primary
+                              : AppColors.error,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      // Expanded content right side
+                      if (isExpanded) ...[
+                        const SizedBox(height: 12),
+                        const Divider(color: AppColors.border, height: 1),
+                        const SizedBox(height: 12),
+                        Text(
+                          openTime,
+                          style: const TextStyle(
+                            color: AppColors.textMuted,
+                            fontSize: 11,
+                          ),
+                        ),
+                        Text(
+                          '#$ticket',
+                          style: const TextStyle(
+                            color: AppColors.textMuted,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -646,6 +905,10 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
           onModifyPosition: widget.onModifyPosition,
           onRefreshAllPositions: widget.onRefreshAllPositions,
           accountNames: widget.accountNames,
+          includeCommissionSwap: widget.includeCommissionSwap,
+          showPLPercent: widget.showPLPercent,
+          confirmBeforeClose: widget.confirmBeforeClose,
+          onConfirmBeforeCloseChanged: widget.onConfirmBeforeCloseChanged,
         ),
       ),
     );
@@ -655,46 +918,12 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: const TextStyle(color: AppColors.textSecondary, fontSize: 11)),
         Text(
-          value,
-          style: const TextStyle(color: Colors.white, fontSize: 14),
+          label,
+          style: const TextStyle(color: AppColors.textSecondary, fontSize: 11),
         ),
+        Text(value, style: const TextStyle(color: Colors.white, fontSize: 14)),
       ],
-    );
-  }
-
-  Widget _buildStatusChip(bool connected, bool tradeAllowed) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: connected
-            ? (tradeAllowed ? AppColors.primary : AppColors.warning)
-            : AppColors.error,
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 6,
-            height: 6,
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              shape: BoxShape.circle,
-            ),
-          ),
-          const SizedBox(width: 6),
-          Text(
-            connected ? (tradeAllowed ? 'Active' : 'Read Only') : 'Offline',
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
-      ),
     );
   }
 
@@ -705,14 +934,17 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
         Text(label, style: AppTextStyles.body),
         const SizedBox(height: 4),
         Text(
-          value.toStringAsFixed(2),
+          Formatters.formatCurrency(value),
           style: const TextStyle(
             color: Colors.white,
-            fontSize: 24,
+            fontSize: 18,
             fontWeight: FontWeight.bold,
           ),
         ),
-        Text(currency, style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+        Text(
+          currency,
+          style: const TextStyle(color: AppColors.textSecondary, fontSize: 11),
+        ),
       ],
     );
   }
@@ -721,11 +953,18 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: const TextStyle(color: AppColors.textSecondary, fontSize: 11)),
+        Text(
+          label,
+          style: const TextStyle(color: AppColors.textSecondary, fontSize: 11),
+        ),
         const SizedBox(height: 2),
         Text(
           value,
-          style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w500),
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 15,
+            fontWeight: FontWeight.w500,
+          ),
         ),
       ],
     );

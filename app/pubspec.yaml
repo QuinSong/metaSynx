@@ -11,8 +11,10 @@ dependencies:
     sdk: flutter
   cupertino_icons: ^1.0.8
   mobile_scanner: ^4.0.0
+  intl: ^0.18.0
   shared_preferences: ^2.2.0
   device_info_plus: ^9.1.0
+  webview_flutter: ^4.4.2
 
 dev_dependencies:
   flutter_test:

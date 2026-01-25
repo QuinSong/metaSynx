@@ -1,18 +1,44 @@
 import 'package:flutter/material.dart';
-import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/theme.dart';
+import 'account_names_screen.dart';
+import 'lot_sizing_screen.dart';
+import 'symbol_suffixes_screen.dart';
 
 class AccountSettingsScreen extends StatefulWidget {
   final List<Map<String, dynamic>> accounts;
   final Map<String, String> accountNames;
+  final String? mainAccountNum;
+  final Map<String, double> lotRatios;
+  final Map<String, String> symbolSuffixes;
+  final bool includeCommissionSwap;
+  final bool showPLPercent;
+  final bool confirmBeforeClose;
   final Function(Map<String, String>) onNamesUpdated;
+  final Function(String?) onMainAccountUpdated;
+  final Function(Map<String, double>) onLotRatiosUpdated;
+  final Function(Map<String, String>) onSymbolSuffixesUpdated;
+  final Function(bool) onIncludeCommissionSwapUpdated;
+  final Function(bool) onShowPLPercentUpdated;
+  final Function(bool) onConfirmBeforeCloseUpdated;
 
   const AccountSettingsScreen({
     super.key,
     required this.accounts,
     required this.accountNames,
+    required this.mainAccountNum,
+    required this.lotRatios,
+    required this.symbolSuffixes,
+    required this.includeCommissionSwap,
+    required this.showPLPercent,
+    required this.confirmBeforeClose,
     required this.onNamesUpdated,
+    required this.onMainAccountUpdated,
+    required this.onLotRatiosUpdated,
+    required this.onSymbolSuffixesUpdated,
+    required this.onIncludeCommissionSwapUpdated,
+    required this.onShowPLPercentUpdated,
+    required this.onConfirmBeforeCloseUpdated,
   });
 
   @override
@@ -20,58 +46,143 @@ class AccountSettingsScreen extends StatefulWidget {
 }
 
 class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
-  late Map<String, TextEditingController> _controllers;
-  late Map<String, String> _names;
+  late Map<String, String> _accountNames;
+  late String? _mainAccountNum;
+  late Map<String, double> _lotRatios;
+  late Map<String, String> _symbolSuffixes;
+  late bool _includeCommissionSwap;
+  late bool _showPLPercent;
+  late bool _confirmBeforeClose;
 
   @override
   void initState() {
     super.initState();
-    _names = Map.from(widget.accountNames);
-    _controllers = {};
-    
-    for (final account in widget.accounts) {
-      final accountNum = account['account'] as String? ?? '';
-      final currentName = _names[accountNum] ?? '';
-      _controllers[accountNum] = TextEditingController(text: currentName);
-    }
+    _accountNames = Map.from(widget.accountNames);
+    _mainAccountNum = widget.mainAccountNum;
+    _lotRatios = Map.from(widget.lotRatios);
+    _symbolSuffixes = Map.from(widget.symbolSuffixes);
+    _includeCommissionSwap = widget.includeCommissionSwap;
+    _showPLPercent = widget.showPLPercent;
+    _confirmBeforeClose = widget.confirmBeforeClose;
   }
 
-  @override
-  void dispose() {
-    for (final controller in _controllers.values) {
-      controller.dispose();
-    }
-    super.dispose();
-  }
+  Future<void> _toggleCommissionSwap(bool value) async {
+    setState(() {
+      _includeCommissionSwap = value;
+    });
 
-  Future<void> _saveNames() async {
-    // Update names from controllers
-    for (final account in widget.accounts) {
-      final accountNum = account['account'] as String? ?? '';
-      final newName = _controllers[accountNum]?.text.trim() ?? '';
-      if (newName.isNotEmpty) {
-        _names[accountNum] = newName;
-      } else {
-        _names.remove(accountNum);
-      }
-    }
-
-    // Save to SharedPreferences
+    // Save to prefs
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('account_names', jsonEncode(_names));
+    await prefs.setBool('include_commission_swap', value);
 
     // Notify parent
-    widget.onNamesUpdated(_names);
+    widget.onIncludeCommissionSwapUpdated(value);
+  }
 
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Account names saved'),
-          backgroundColor: AppColors.primary,
+  Future<void> _toggleConfirmBeforeClose(bool value) async {
+    setState(() {
+      _confirmBeforeClose = value;
+    });
+
+    // Save to prefs
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('confirm_before_close', value);
+
+    // Notify parent
+    widget.onConfirmBeforeCloseUpdated(value);
+  }
+
+  Future<void> _toggleShowPLPercent(bool value) async {
+    setState(() {
+      _showPLPercent = value;
+    });
+
+    // Save to prefs
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('show_pl_percent', value);
+
+    // Notify parent
+    widget.onShowPLPercentUpdated(value);
+  }
+
+  void _openAccountNames() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => AccountNamesScreen(
+          accounts: widget.accounts,
+          accountNames: _accountNames,
+          onNamesUpdated: (names) {
+            setState(() {
+              _accountNames = names;
+            });
+            widget.onNamesUpdated(names);
+          },
         ),
-      );
-      Navigator.pop(context);
+      ),
+    );
+  }
+
+  void _openLotSizing() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => LotSizingScreen(
+          accounts: widget.accounts,
+          accountNames: _accountNames,
+          mainAccountNum: _mainAccountNum,
+          lotRatios: _lotRatios,
+          onMainAccountUpdated: (mainAccount) {
+            setState(() {
+              _mainAccountNum = mainAccount;
+            });
+            widget.onMainAccountUpdated(mainAccount);
+          },
+          onLotRatiosUpdated: (ratios) {
+            setState(() {
+              _lotRatios = ratios;
+            });
+            widget.onLotRatiosUpdated(ratios);
+          },
+        ),
+      ),
+    );
+  }
+
+  void _openSymbolSuffixes() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => SymbolSuffixesScreen(
+          accounts: widget.accounts,
+          accountNames: _accountNames,
+          symbolSuffixes: _symbolSuffixes,
+          onSymbolSuffixesUpdated: (suffixes) {
+            setState(() {
+              _symbolSuffixes = suffixes;
+            });
+            widget.onSymbolSuffixesUpdated(suffixes);
+          },
+        ),
+      ),
+    );
+  }
+
+  String _getMainAccountDisplay() {
+    if (_mainAccountNum == null) return 'Not set';
+    final customName = _accountNames[_mainAccountNum];
+    if (customName != null && customName.isNotEmpty) {
+      return customName;
     }
+    return _mainAccountNum!;
+  }
+
+  int _getNamedAccountsCount() {
+    return _accountNames.values.where((name) => name.isNotEmpty).length;
+  }
+
+  int _getSuffixesCount() {
+    return _symbolSuffixes.values.where((suffix) => suffix.isNotEmpty).length;
   }
 
   @override
@@ -80,160 +191,302 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
       backgroundColor: AppColors.background,
       appBar: AppBar(
         backgroundColor: AppColors.background,
-        title: const Text('Account Names', style: TextStyle(color: Colors.white)),
+        title: const Text('Settings', style: TextStyle(color: Colors.white)),
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          icon: const Icon(Icons.chevron_left, color: Colors.white),
           onPressed: () => Navigator.pop(context),
         ),
-        actions: [
-          TextButton(
-            onPressed: _saveNames,
-            child: const Text(
-              'SAVE',
-              style: TextStyle(
-                color: AppColors.primary,
-                fontWeight: FontWeight.bold,
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          // Account Names Card
+          _buildNavigationCard(
+            icon: Icons.badge_outlined,
+            title: 'Account Names',
+            subtitle:
+                '${_getNamedAccountsCount()} of ${widget.accounts.length} accounts named',
+            onTap: _openAccountNames,
+          ),
+
+          const SizedBox(height: 12),
+
+          // Lot Sizing Card
+          _buildNavigationCard(
+            icon: Icons.scale_outlined,
+            title: 'Lot Sizing',
+            subtitle: _mainAccountNum != null
+                ? 'Main: ${_getMainAccountDisplay()}'
+                : 'Configure proportional lot sizes',
+            onTap: _openLotSizing,
+          ),
+
+          const SizedBox(height: 12),
+
+          // Symbol Suffixes Card
+          _buildNavigationCard(
+            icon: Icons.text_fields_outlined,
+            title: 'Symbol Suffixes',
+            subtitle: _getSuffixesCount() > 0
+                ? '${_getSuffixesCount()} suffix${_getSuffixesCount() == 1 ? '' : 'es'} configured'
+                : 'Add broker-specific symbol suffixes',
+            onTap: _openSymbolSuffixes,
+          ),
+
+          const SizedBox(height: 24),
+
+          // Include Commission & Swap Checkbox
+          GestureDetector(
+            onTap: () => _toggleCommissionSwap(!_includeCommissionSwap),
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      color: AppColors.primaryWithOpacity(0.15),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(
+                      Icons.calculate_outlined,
+                      color: AppColors.primary,
+                      size: 24,
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Include Commission & Swap',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          _includeCommissionSwap
+                              ? 'P/L includes commission and swap fees'
+                              : 'P/L shows raw profit only',
+                          style: const TextStyle(
+                            color: AppColors.textSecondary,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Checkbox(
+                    value: _includeCommissionSwap,
+                    onChanged: (v) => _toggleCommissionSwap(v ?? false),
+                    activeColor: AppColors.primary,
+                    side: const BorderSide(color: AppColors.textSecondary),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 12),
+
+          // Show P/L % Checkbox
+          GestureDetector(
+            onTap: () => _toggleShowPLPercent(!_showPLPercent),
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      color: AppColors.primaryWithOpacity(0.15),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(
+                      Icons.percent,
+                      color: AppColors.primary,
+                      size: 24,
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Show P/L %',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          _showPLPercent
+                              ? 'Display P/L as percentage of balance'
+                              : 'P/L percentage hidden',
+                          style: const TextStyle(
+                            color: AppColors.textSecondary,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Checkbox(
+                    value: _showPLPercent,
+                    onChanged: (v) => _toggleShowPLPercent(v ?? false),
+                    activeColor: AppColors.primary,
+                    side: const BorderSide(color: AppColors.textSecondary),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 12),
+
+          // Confirm Before Close Checkbox
+          GestureDetector(
+            onTap: () => _toggleConfirmBeforeClose(!_confirmBeforeClose),
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      color: AppColors.primaryWithOpacity(0.15),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(
+                      Icons.warning_amber_rounded,
+                      color: AppColors.primary,
+                      size: 24,
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Confirm Before Closing',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          _confirmBeforeClose
+                              ? 'Show confirmation dialog before closing positions'
+                              : 'Close positions without confirmation',
+                          style: const TextStyle(
+                            color: AppColors.textSecondary,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Checkbox(
+                    value: _confirmBeforeClose,
+                    onChanged: (v) => _toggleConfirmBeforeClose(v ?? false),
+                    activeColor: AppColors.primary,
+                    side: const BorderSide(color: AppColors.textSecondary),
+                  ),
+                ],
               ),
             ),
           ),
         ],
       ),
-      body: widget.accounts.isEmpty
-          ? const Center(
-              child: Text(
-                'No accounts connected',
-                style: AppTextStyles.body,
-              ),
-            )
-          : ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: widget.accounts.length,
-              itemBuilder: (context, index) {
-                final account = widget.accounts[index];
-                final accountNum = account['account'] as String? ?? '';
-                final broker = account['broker'] as String? ?? '';
-                final server = account['server'] as String? ?? '';
+    );
+  }
 
-                return Container(
-                  margin: const EdgeInsets.only(bottom: 16),
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: AppColors.surface,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: AppColors.border),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Container(
-                            width: 40,
-                            height: 40,
-                            decoration: BoxDecoration(
-                              color: AppColors.primaryWithOpacity(0.2),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Center(
-                              child: Text(
-                                '${index + 1}',
-                                style: const TextStyle(
-                                  color: AppColors.primary,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 16,
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  accountNum,
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                                Text(
-                                  broker,
-                                  style: const TextStyle(
-                                    color: AppColors.textSecondary,
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      const Text(
-                        'Display Name',
-                        style: TextStyle(
-                          color: AppColors.textSecondary,
-                          fontSize: 12,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      TextField(
-                        controller: _controllers[accountNum],
-                        style: const TextStyle(color: Colors.white),
-                        decoration: InputDecoration(
-                          hintText: 'Enter custom name (optional)',
-                          hintStyle: TextStyle(
-                            color: AppColors.textSecondary.withOpacity(0.5),
-                          ),
-                          filled: true,
-                          fillColor: AppColors.background,
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            borderSide: const BorderSide(color: AppColors.border),
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            borderSide: const BorderSide(color: AppColors.border),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            borderSide: const BorderSide(color: AppColors.primary),
-                          ),
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 12,
-                          ),
-                          suffixIcon: _controllers[accountNum]?.text.isNotEmpty == true
-                              ? IconButton(
-                                  icon: const Icon(
-                                    Icons.clear,
-                                    color: AppColors.textSecondary,
-                                    size: 18,
-                                  ),
-                                  onPressed: () {
-                                    _controllers[accountNum]?.clear();
-                                    setState(() {});
-                                  },
-                                )
-                              : null,
-                        ),
-                        onChanged: (_) => setState(() {}),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Server: $server',
-                        style: const TextStyle(
-                          color: AppColors.textMuted,
-                          fontSize: 11,
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              },
+  Widget _buildNavigationCard({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: AppColors.primaryWithOpacity(0.15),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(icon, color: AppColors.primary, size: 24),
             ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(
+                      color: AppColors.textSecondary,
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(
+              Icons.chevron_right,
+              color: AppColors.textSecondary,
+              size: 24,
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
