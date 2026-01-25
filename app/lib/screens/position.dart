@@ -10,6 +10,7 @@ class PositionDetailScreen extends StatefulWidget {
   final void Function(int ticket, int terminalIndex) onClosePosition;
   final void Function(int ticket, int terminalIndex, double? sl, double? tp) onModifyPosition;
   final Map<String, String> accountNames;
+  final String? mainAccountNum;
   final bool includeCommissionSwap;
   final bool showPLPercent;
   final bool confirmBeforeClose;
@@ -23,6 +24,7 @@ class PositionDetailScreen extends StatefulWidget {
     required this.onClosePosition,
     required this.onModifyPosition,
     required this.accountNames,
+    this.mainAccountNum,
     required this.includeCommissionSwap,
     required this.showPLPercent,
     required this.confirmBeforeClose,
@@ -536,6 +538,7 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
           onClosePosition: widget.onClosePosition,
           onModifyPosition: widget.onModifyPosition,
           accountNames: widget.accountNames,
+          mainAccountNum: widget.mainAccountNum,
           includeCommissionSwap: widget.includeCommissionSwap,
           showPLPercent: widget.showPLPercent,
           confirmBeforeClose: widget.confirmBeforeClose,
@@ -573,38 +576,40 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
           ),
         ],
       ),
-      body: ValueListenableBuilder<List<Map<String, dynamic>>>(
-        valueListenable: widget.positionsNotifier,
-        builder: (context, allPositions, _) {
-          final currentPos = _getCurrentPosition();
-          final matchingPositions = _findMatchingPositions();
-          
-          if (currentPos == null) {
-            return const Center(
-              child: Text('Position closed', style: AppTextStyles.body),
-            );
-          }
+      body: SafeArea(
+        top: false, // AppBar handles top
+        child: ValueListenableBuilder<List<Map<String, dynamic>>>(
+          valueListenable: widget.positionsNotifier,
+          builder: (context, allPositions, _) {
+            final currentPos = _getCurrentPosition();
+            final matchingPositions = _findMatchingPositions();
+            
+            if (currentPos == null) {
+              return const Center(
+                child: Text('Position closed', style: AppTextStyles.body),
+              );
+            }
 
-          final symbol = currentPos['symbol'] as String? ?? '';
-          final type = currentPos['type'] as String? ?? '';
-          final lots = (currentPos['lots'] as num?)?.toDouble() ?? 0;
-          final openPrice = (currentPos['openPrice'] as num?)?.toDouble() ?? 0;
-          final currentPrice = (currentPos['currentPrice'] as num?)?.toDouble() ?? 0;
-          final rawProfit = (currentPos['profit'] as num?)?.toDouble() ?? 0;
-          final swap = (currentPos['swap'] as num?)?.toDouble() ?? 0;
-          final commission = (currentPos['commission'] as num?)?.toDouble() ?? 0;
-          final profit = widget.includeCommissionSwap 
-              ? rawProfit + swap + commission 
-              : rawProfit;
-          final isBuy = type.toLowerCase() == 'buy';
-          
-          // Get account balance for P/L %
-          final posTerminalIndex = currentPos['terminalIndex'] as int? ?? -1;
-          final account = widget.accounts.firstWhere(
-            (a) => a['index'] == posTerminalIndex,
-            orElse: () => <String, dynamic>{},
-          );
-          final balance = (account['balance'] as num?)?.toDouble() ?? 0;
+            final symbol = currentPos['symbol'] as String? ?? '';
+            final type = currentPos['type'] as String? ?? '';
+            final lots = (currentPos['lots'] as num?)?.toDouble() ?? 0;
+            final openPrice = (currentPos['openPrice'] as num?)?.toDouble() ?? 0;
+            final currentPrice = (currentPos['currentPrice'] as num?)?.toDouble() ?? 0;
+            final rawProfit = (currentPos['profit'] as num?)?.toDouble() ?? 0;
+            final swap = (currentPos['swap'] as num?)?.toDouble() ?? 0;
+            final commission = (currentPos['commission'] as num?)?.toDouble() ?? 0;
+            final profit = widget.includeCommissionSwap 
+                ? rawProfit + swap + commission 
+                : rawProfit;
+            final isBuy = type.toLowerCase() == 'buy';
+            
+            // Get account balance for P/L %
+            final posTerminalIndex = currentPos['terminalIndex'] as int? ?? -1;
+            final account = widget.accounts.firstWhere(
+              (a) => a['index'] == posTerminalIndex,
+              orElse: () => <String, dynamic>{},
+            );
+            final balance = (account['balance'] as num?)?.toDouble() ?? 0;
           final plPercent = balance > 0 ? (profit / balance) * 100 : 0.0;
 
           // Calculate total P/L across all matching positions
@@ -620,11 +625,27 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
             }
           }
 
-          // Use known terminals for display to avoid flickering, sorted by index for consistent order
+          // Use known terminals for display to avoid flickering, sorted with main account first
           final displayTerminalsSet = _knownTerminalIndices.isNotEmpty 
               ? _knownTerminalIndices 
               : matchingPositions.map((p) => p['terminalIndex'] as int).toSet();
-          final displayTerminals = displayTerminalsSet.toList()..sort();
+          final displayTerminals = displayTerminalsSet.toList();
+          // Sort with main account first
+          displayTerminals.sort((a, b) {
+            final aAccount = widget.accounts.firstWhere(
+              (acc) => acc['index'] == a,
+              orElse: () => <String, dynamic>{},
+            );
+            final bAccount = widget.accounts.firstWhere(
+              (acc) => acc['index'] == b,
+              orElse: () => <String, dynamic>{},
+            );
+            final aIsMain = aAccount['account'] == widget.mainAccountNum;
+            final bIsMain = bAccount['account'] == widget.mainAccountNum;
+            if (aIsMain && !bIsMain) return -1;
+            if (!aIsMain && bIsMain) return 1;
+            return a.compareTo(b);
+          });
 
           return SingleChildScrollView(
             padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
@@ -1051,6 +1072,7 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
             ),
           );
         },
+      ),
       ),
     );
   }

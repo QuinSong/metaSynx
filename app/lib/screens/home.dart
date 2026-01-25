@@ -10,7 +10,7 @@ import '../utils/formatters.dart';
 import 'qr_scanner.dart';
 import 'new_order.dart';
 import 'account.dart';
-import 'settings.dart';
+import 'settings/settings.dart';
 import 'chart.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -284,6 +284,7 @@ class _HomeScreenState extends State<HomeScreen> {
           onClosePosition: _closePosition,
           onModifyPosition: _modifyPosition,
           accountNames: _accountNames,
+          mainAccountNum: _mainAccountNum,
           includeCommissionSwap: _includeCommissionSwap,
           showPLPercent: _showPLPercent,
           confirmBeforeClose: _confirmBeforeClose,
@@ -317,6 +318,7 @@ class _HomeScreenState extends State<HomeScreen> {
     required double? sl,
     required List<int> accountIndices,
     required bool useRatios,
+    required bool applySuffix,
   }) {
     // Generate unique magic number for this order batch
     // Using timestamp to ensure uniqueness across orders
@@ -336,17 +338,20 @@ class _HomeScreenState extends State<HomeScreen> {
         adjustedLots = double.parse((lots * ratio).toStringAsFixed(2));
       }
       
-      // Get account for symbol suffix
-      final account = _accountsNotifier.value.firstWhere(
-        (a) => a['index'] == index,
-        orElse: () => <String, dynamic>{},
-      );
-      final accountNum = account['account'] as String? ?? '';
-      final symbolWithSuffix = _getSymbolWithSuffix(symbol, accountNum);
+      // Get account for symbol suffix (only if applySuffix is true)
+      String finalSymbol = symbol;
+      if (applySuffix) {
+        final account = _accountsNotifier.value.firstWhere(
+          (a) => a['index'] == index,
+          orElse: () => <String, dynamic>{},
+        );
+        final accountNum = account['account'] as String? ?? '';
+        finalSymbol = _getSymbolWithSuffix(symbol, accountNum);
+      }
       
       _connection.send({
         'action': 'place_order',
-        'symbol': symbolWithSuffix,
+        'symbol': finalSymbol,
         'type': type,
         'lots': adjustedLots,
         'tp': tp ?? 0,
@@ -436,13 +441,24 @@ class _HomeScreenState extends State<HomeScreen> {
                             return ValueListenableBuilder<List<Map<String, dynamic>>>(
                               valueListenable: _positionsNotifier,
                               builder: (context, positions, _) {
+                                // Sort accounts with main account first
+                                final sortedAccounts = List<Map<String, dynamic>>.from(accounts);
+                                sortedAccounts.sort((a, b) {
+                                  final aIsMain = a['account'] == _mainAccountNum;
+                                  final bIsMain = b['account'] == _mainAccountNum;
+                                  if (aIsMain && !bIsMain) return -1;
+                                  if (!aIsMain && bIsMain) return 1;
+                                  return (a['index'] as int? ?? 0).compareTo(b['index'] as int? ?? 0);
+                                });
                                 return ListView(
                                   children: [
                                     // Show totals section if more than 1 account
-                                    if (accounts.length > 1)
-                                      _buildTotalsSection(accounts, positions),
+                                    if (sortedAccounts.length > 1)
+                                      _buildTotalsSection(sortedAccounts, positions),
                                     // Account cards
-                                    ...accounts.map((account) => _buildAccountCard(account)),
+                                    ...sortedAccounts.map((account) => _buildAccountCard(account)),
+                                    // Spacer for FAB clearance
+                                    const SizedBox(height: 80),
                                   ],
                                 );
                               },
@@ -460,6 +476,7 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       floatingActionButton: showFab
           ? FloatingActionButton.extended(
+              heroTag: 'home_new_order_fab',
               onPressed: _openNewOrder,
               backgroundColor: AppColors.primary,
               icon: const Icon(Icons.add, color: Colors.black),
@@ -509,6 +526,7 @@ class _HomeScreenState extends State<HomeScreen> {
           onClosePosition: _closePosition,
           onModifyPosition: _modifyPosition,
           accountNames: _accountNames,
+          mainAccountNum: _mainAccountNum,
           includeCommissionSwap: _includeCommissionSwap,
           showPLPercent: _showPLPercent,
           confirmBeforeClose: _confirmBeforeClose,

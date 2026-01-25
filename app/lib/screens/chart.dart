@@ -11,6 +11,7 @@ class ChartScreen extends StatefulWidget {
   final void Function(int ticket, int terminalIndex) onClosePosition;
   final void Function(int ticket, int terminalIndex, double? sl, double? tp) onModifyPosition;
   final Map<String, String> accountNames;
+  final String? mainAccountNum;
   final bool includeCommissionSwap;
   final bool showPLPercent;
   final bool confirmBeforeClose;
@@ -25,6 +26,7 @@ class ChartScreen extends StatefulWidget {
     required this.onClosePosition,
     required this.onModifyPosition,
     required this.accountNames,
+    this.mainAccountNum,
     required this.includeCommissionSwap,
     required this.showPLPercent,
     required this.confirmBeforeClose,
@@ -123,6 +125,7 @@ class _ChartScreenState extends State<ChartScreen> {
           onClosePosition: widget.onClosePosition,
           onModifyPosition: widget.onModifyPosition,
           accountNames: widget.accountNames,
+          mainAccountNum: widget.mainAccountNum,
           includeCommissionSwap: widget.includeCommissionSwap,
           showPLPercent: widget.showPLPercent,
           confirmBeforeClose: widget.confirmBeforeClose,
@@ -739,22 +742,24 @@ class _ChartScreenState extends State<ChartScreen> {
           ],
         ),
       ),
-      body: Column(
-        children: [
-          // Account selector row
-          if (widget.accounts.isNotEmpty)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              color: AppColors.surface,
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: [
-                    // Account buttons
-                    ...List.generate(widget.accounts.length, (index) {
-                      final account = widget.accounts[index];
-                      final accountNum = account['account']?.toString() ?? '';
-                      final accountName = widget.accountNames[accountNum] ?? accountNum;
+      body: SafeArea(
+        top: false, // AppBar handles top
+        child: Column(
+          children: [
+            // Account selector row
+            if (widget.accounts.isNotEmpty)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                color: AppColors.surface,
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      // Account buttons
+                      ...List.generate(widget.accounts.length, (index) {
+                        final account = widget.accounts[index];
+                        final accountNum = account['account']?.toString() ?? '';
+                        final accountName = widget.accountNames[accountNum] ?? accountNum;
                       final isSelected = _selectedAccountIndex == index;
                       
                       return Padding(
@@ -923,6 +928,7 @@ class _ChartScreenState extends State<ChartScreen> {
             ),
           ),
         ],
+      ),
       ),
     );
       },

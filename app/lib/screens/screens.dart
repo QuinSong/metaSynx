@@ -4,7 +4,7 @@ export 'home.dart';
 export 'new_order.dart';
 export 'position.dart';
 export 'qr_scanner.dart';
-export 'settings.dart';
+export 'settings/settings.dart';
 export 'settings/account_names.dart';
 export 'settings/lot_sizing.dart';
 export 'settings/preferred_symbols.dart';

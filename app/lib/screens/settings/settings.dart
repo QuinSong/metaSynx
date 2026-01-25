@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../core/theme.dart';
-import 'settings/account_names.dart';
-import 'settings/lot_sizing.dart';
-import 'settings/symbol_suffixes.dart';
-import 'settings/preferred_symbols.dart';
+import '../../core/theme.dart';
+import 'account_names.dart';
+import 'lot_sizing.dart';
+import 'symbol_suffixes.dart';
+import 'preferred_symbols.dart';
 
 class SettingsScreen extends StatefulWidget {
   final List<Map<String, dynamic>> accounts;
@@ -225,29 +225,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
           onPressed: () => Navigator.pop(context),
         ),
       ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-        children: [
-          // Account Names Card
-          _buildNavigationCard(
-            icon: Icons.badge_outlined,
-            title: 'Account Names',
-            subtitle: '${_getNamedAccountsCount()} of ${widget.accounts.length} accounts named',
-            onTap: _openAccountNames,
-          ),
-          
-          const SizedBox(height: 12),
-          
-          // Lot Sizing Card
-          _buildNavigationCard(
-            icon: Icons.scale_outlined,
-            title: 'Lot Sizing',
-            subtitle: _mainAccountNum != null 
-                ? 'Main: ${_getMainAccountDisplay()}'
-                : 'Configure proportional lot sizes',
-            onTap: _openLotSizing,
-          ),
-          
+      body: SafeArea(
+        top: false, // AppBar handles top
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+          children: [
+            // Account Names Card
+            _buildNavigationCard(
+              icon: Icons.badge_outlined,
+              title: 'Account Names',
+              subtitle: '${_getNamedAccountsCount()} of ${widget.accounts.length} accounts named',
+              onTap: _openAccountNames,
+            ),
+            
+            const SizedBox(height: 12),
+            
+            // Lot Sizing Card
+            _buildNavigationCard(
+              icon: Icons.scale_outlined,
+              title: 'Lot Sizing',
+              subtitle: _mainAccountNum != null 
+                  ? 'Main account: ${_getMainAccountDisplay()}'
+                  : 'Configure proportional lot sizes',
+              onTap: _openLotSizing,
+            ),
+            
           const SizedBox(height: 12),
           
           // Preferred Symbols Card
@@ -268,8 +270,72 @@ class _SettingsScreenState extends State<SettingsScreen> {
             title: 'Symbol Suffixes',
             subtitle: _getSuffixesCount() > 0
                 ? '${_getSuffixesCount()} suffix${_getSuffixesCount() == 1 ? '' : 'es'} configured'
-                : 'Add broker-specific symbol suffixes',
+                : 'Add broker symbol suffixes',
             onTap: _openSymbolSuffixes,
+          ),
+          
+          const SizedBox(height: 12),
+          
+          // Confirm Before Close Checkbox
+          GestureDetector(
+            onTap: () => _toggleConfirmBeforeClose(!_confirmBeforeClose),
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      color: AppColors.primaryWithOpacity(0.15),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(
+                      Icons.warning_amber_rounded,
+                      color: AppColors.primary,
+                      size: 24,
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Confirm Before Closing',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          _confirmBeforeClose 
+                              ? 'Show confirmation dialog before closing positions'
+                              : 'Close positions without confirmation',
+                          style: const TextStyle(
+                            color: AppColors.textSecondary,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Checkbox(
+                    value: _confirmBeforeClose,
+                    onChanged: (v) => _toggleConfirmBeforeClose(v ?? false),
+                    activeColor: AppColors.primary,
+                    side: const BorderSide(color: AppColors.textSecondary),
+                  ),
+                ],
+              ),
+            ),
           ),
           
           const SizedBox(height: 12),
@@ -399,71 +465,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
           ),
-          
-          const SizedBox(height: 12),
-          
-          // Confirm Before Close Checkbox
-          GestureDetector(
-            onTap: () => _toggleConfirmBeforeClose(!_confirmBeforeClose),
-            child: Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: AppColors.surface,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppColors.border),
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    width: 48,
-                    height: 48,
-                    decoration: BoxDecoration(
-                      color: AppColors.primaryWithOpacity(0.15),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: const Icon(
-                      Icons.warning_amber_rounded,
-                      color: AppColors.primary,
-                      size: 24,
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Confirm Before Closing',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          _confirmBeforeClose 
-                              ? 'Show confirmation dialog before closing positions'
-                              : 'Close positions without confirmation',
-                          style: const TextStyle(
-                            color: AppColors.textSecondary,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Checkbox(
-                    value: _confirmBeforeClose,
-                    onChanged: (v) => _toggleConfirmBeforeClose(v ?? false),
-                    activeColor: AppColors.primary,
-                    side: const BorderSide(color: AppColors.textSecondary),
-                  ),
-                ],
-              ),
-            ),
-          ),
         ],
+        ),
       ),
     );
   }

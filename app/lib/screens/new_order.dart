@@ -15,6 +15,7 @@ class NewOrderScreen extends StatefulWidget {
     required double? sl,
     required List<int> accountIndices,
     required bool useRatios,
+    required bool applySuffix,
   }) onPlaceOrder;
 
   const NewOrderScreen({
@@ -40,6 +41,7 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
   String _orderType = 'buy';
   late Set<int> _selectedAccountIndices;
   bool _isPlacing = false;
+  bool _applySuffix = true; // Whether to apply broker suffix to symbol
 
   // Default pairs if none selected in settings
   static const List<String> _defaultPairs = [
@@ -52,6 +54,18 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
       return widget.preferredPairs.toList()..sort();
     }
     return _defaultPairs;
+  }
+
+  List<Map<String, dynamic>> _getSortedAccounts() {
+    final sorted = List<Map<String, dynamic>>.from(widget.accounts);
+    sorted.sort((a, b) {
+      final aIsMain = a['account'] == widget.mainAccountNum;
+      final bIsMain = b['account'] == widget.mainAccountNum;
+      if (aIsMain && !bIsMain) return -1;
+      if (!aIsMain && bIsMain) return 1;
+      return (a['index'] as int? ?? 0).compareTo(b['index'] as int? ?? 0);
+    });
+    return sorted;
   }
 
   @override
@@ -150,6 +164,7 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
       sl: sl,
       accountIndices: _selectedAccountIndices.toList(),
       useRatios: _useRatios,
+      applySuffix: _applySuffix,
     );
 
     // Show confirmation and go back
@@ -187,32 +202,34 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
           onPressed: () => Navigator.pop(context),
         ),
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Symbol
-            const Text('SYMBOL', style: AppTextStyles.label),
-            const SizedBox(height: 8),
-            _buildSymbolField(),
-            const SizedBox(height: 8),
-            _buildQuickPairs(),
+      body: SafeArea(
+        top: false, // AppBar handles top
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Symbol
+              const Text('SYMBOL', style: AppTextStyles.label),
+              const SizedBox(height: 8),
+              _buildSymbolField(),
+              const SizedBox(height: 8),
+              _buildQuickPairs(),
 
-            const SizedBox(height: 24),
+              const SizedBox(height: 24),
 
-            // Buy/Sell toggle
-            const Text('ORDER TYPE', style: AppTextStyles.label),
-            const SizedBox(height: 8),
-            _buildOrderTypeToggle(),
+              // Buy/Sell toggle
+              const Text('ORDER TYPE', style: AppTextStyles.label),
+              const SizedBox(height: 8),
+              _buildOrderTypeToggle(),
 
-            const SizedBox(height: 24),
+              const SizedBox(height: 24),
 
-            // Accounts selection
-            Text(
-              'ACCOUNTS (${_selectedAccountIndices.length}/${widget.accounts.length})',
-              style: AppTextStyles.label,
-            ),
+              // Accounts selection
+              Text(
+                'ACCOUNTS (${_selectedAccountIndices.length}/${widget.accounts.length})',
+                style: AppTextStyles.label,
+              ),
             const SizedBox(height: 8),
             _buildAccountsSelection(),
 
@@ -282,26 +299,70 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
             ),
           ],
         ),
+        ),
       ),
     );
   }
 
   Widget _buildSymbolField() {
-    return TextField(
-      controller: _symbolController,
-      style: const TextStyle(color: Colors.white, fontSize: 18),
-      textCapitalization: TextCapitalization.characters,
-      decoration: InputDecoration(
-        hintText: 'e.g. EURUSD',
-        hintStyle: TextStyle(color: AppColors.textSecondary.withOpacity(0.5)),
-        filled: true,
-        fillColor: AppColors.surface,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide.none,
+    return Row(
+      children: [
+        Expanded(
+          child: TextField(
+            controller: _symbolController,
+            style: const TextStyle(color: Colors.white, fontSize: 18),
+            textCapitalization: TextCapitalization.characters,
+            decoration: InputDecoration(
+              hintText: 'e.g. EURUSD',
+              hintStyle: TextStyle(color: AppColors.textSecondary.withOpacity(0.5)),
+              filled: true,
+              fillColor: AppColors.surface,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide.none,
+              ),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+            ),
+          ),
         ),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-      ),
+        const SizedBox(width: 8),
+        GestureDetector(
+          onTap: () {
+            setState(() {
+              _applySuffix = !_applySuffix;
+            });
+          },
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+            decoration: BoxDecoration(
+              color: _applySuffix ? AppColors.primary : AppColors.surface,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: _applySuffix ? AppColors.primary : AppColors.border,
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.add_link,
+                  color: _applySuffix ? Colors.white : AppColors.textSecondary,
+                  size: 20,
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  'Suffix',
+                  style: TextStyle(
+                    color: _applySuffix ? Colors.white : AppColors.textSecondary,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -475,11 +536,11 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
             ),
           ),
         
-        // Account buttons
+        // Account buttons - sort with main account first
         Wrap(
           spacing: 8,
           runSpacing: 8,
-          children: widget.accounts.map((account) {
+          children: _getSortedAccounts().map((account) {
             final index = account['index'] as int;
             final accountNum = account['account'] as String? ?? 'Unknown';
             final customName = widget.accountNames[accountNum];
@@ -566,46 +627,112 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
   }
 
   Widget _buildLotsField() {
-    return Row(
-      children: [
-        IconButton(
-          onPressed: () {
-            final current = double.tryParse(_lotsController.text) ?? 0.01;
-            if (current > 0.01) {
-              _lotsController.text = (current - 0.01).toStringAsFixed(2);
-            }
-          },
-          icon: const Icon(Icons.remove_circle_outline, color: AppColors.primary),
-        ),
-        Expanded(
-          child: TextField(
-            controller: _lotsController,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 24,
-              fontWeight: FontWeight.bold,
-            ),
-            decoration: InputDecoration(
-              filled: true,
-              fillColor: AppColors.surface,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide.none,
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Row(
+        children: [
+          // -0.1 button
+          GestureDetector(
+            onTap: () {
+              final current = double.tryParse(_lotsController.text) ?? 0.01;
+              if (current > 0.1) {
+                _lotsController.text = (current - 0.1).toStringAsFixed(2);
+              } else if (current > 0.01) {
+                _lotsController.text = '0.01';
+              }
+            },
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Text(
+                '-0.1',
+                style: TextStyle(
+                  color: AppColors.error.withOpacity(0.7),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                ),
               ),
-              contentPadding: const EdgeInsets.symmetric(vertical: 16),
             ),
           ),
-        ),
-        IconButton(
-          onPressed: () {
-            final current = double.tryParse(_lotsController.text) ?? 0.01;
-            _lotsController.text = (current + 0.01).toStringAsFixed(2);
-          },
-          icon: const Icon(Icons.add_circle_outline, color: AppColors.primary),
-        ),
-      ],
+          // -0.01 button
+          GestureDetector(
+            onTap: () {
+              final current = double.tryParse(_lotsController.text) ?? 0.01;
+              if (current > 0.01) {
+                _lotsController.text = (current - 0.01).toStringAsFixed(2);
+              }
+            },
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Text(
+                '-0.01',
+                style: TextStyle(
+                  color: AppColors.error.withOpacity(0.7),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ),
+          // Lots input
+          Expanded(
+            child: TextField(
+              controller: _lotsController,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+              ),
+              decoration: const InputDecoration(
+                border: InputBorder.none,
+                contentPadding: EdgeInsets.zero,
+              ),
+            ),
+          ),
+          // +0.01 button
+          GestureDetector(
+            onTap: () {
+              final current = double.tryParse(_lotsController.text) ?? 0.01;
+              _lotsController.text = (current + 0.01).toStringAsFixed(2);
+            },
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Text(
+                '+0.01',
+                style: TextStyle(
+                  color: AppColors.primary.withOpacity(0.7),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ),
+          // +0.1 button
+          GestureDetector(
+            onTap: () {
+              final current = double.tryParse(_lotsController.text) ?? 0.01;
+              _lotsController.text = (current + 0.1).toStringAsFixed(2);
+            },
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Text(
+                '+0.1',
+                style: TextStyle(
+                  color: AppColors.primary.withOpacity(0.7),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 

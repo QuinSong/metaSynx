@@ -98,36 +98,38 @@ class _AccountNamesScreenState extends State<AccountNamesScreen> {
           ),
         ],
       ),
-      body: widget.accounts.isEmpty
-          ? const Center(
-              child: Text(
-                'No accounts connected',
-                style: AppTextStyles.body,
-              ),
-            )
-          : ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: widget.accounts.length,
-              itemBuilder: (context, index) {
-                final account = widget.accounts[index];
-                final accountNum = account['account'] as String? ?? '';
-                final broker = account['broker'] as String? ?? '';
-                final server = account['server'] as String? ?? '';
+      body: SafeArea(
+        top: false, // AppBar handles top
+        child: widget.accounts.isEmpty
+            ? const Center(
+                child: Text(
+                  'No accounts connected',
+                  style: AppTextStyles.body,
+                ),
+              )
+            : ListView.builder(
+                padding: const EdgeInsets.all(16),
+                itemCount: widget.accounts.length,
+                itemBuilder: (context, index) {
+                  final account = widget.accounts[index];
+                  final accountNum = account['account'] as String? ?? '';
+                  final broker = account['broker'] as String? ?? '';
+                  final server = account['server'] as String? ?? '';
 
-                return Container(
-                  margin: const EdgeInsets.only(bottom: 16),
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: AppColors.surface,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: AppColors.border),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Container(
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 16),
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: AppColors.surface,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppColors.border),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
                             width: 40,
                             height: 40,
                             decoration: BoxDecoration(
@@ -234,6 +236,7 @@ class _AccountNamesScreenState extends State<AccountNamesScreen> {
                 );
               },
             ),
+      ),
     );
   }
 }

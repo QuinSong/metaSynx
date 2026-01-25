@@ -164,34 +164,36 @@ class _PreferredSymbolsScreenState extends State<PreferredSymbolsScreen> {
           onPressed: () => Navigator.pop(context),
         ),
       ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-        children: [
-          // Info section
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.orange.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: Colors.orange.withOpacity(0.3)),
-            ),
-            child: Row(
-              children: [
-                Icon(
-                  Icons.info_outline,
-                  color: Colors.orange,
-                  size: 20,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    'Select your preferred trading symbols to show them in the New Order screen for quick access.',
-                    style: TextStyle(
-                      color: Colors.orange.shade200,
-                      fontSize: 12,
+      body: SafeArea(
+        top: false, // AppBar handles top
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+          children: [
+            // Info section
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.orange.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.orange.withOpacity(0.3)),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.info_outline,
+                    color: Colors.orange,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'Select your preferred trading symbols to show them in the New Order screen for quick access.',
+                      style: TextStyle(
+                        color: Colors.orange.shade200,
+                        fontSize: 12,
+                      ),
                     ),
                   ),
-                ),
               ],
             ),
           ),
@@ -323,6 +325,7 @@ class _PreferredSymbolsScreenState extends State<PreferredSymbolsScreen> {
             const SizedBox(height: 16),
           ],
         ],
+        ),
       ),
     );
   }

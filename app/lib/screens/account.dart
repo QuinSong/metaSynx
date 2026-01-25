@@ -12,6 +12,7 @@ class AccountDetailScreen extends StatefulWidget {
   final void Function(int ticket, int terminalIndex) onClosePosition;
   final void Function(int ticket, int terminalIndex, double? sl, double? tp) onModifyPosition;
   final Map<String, String> accountNames;
+  final String? mainAccountNum;
   final bool includeCommissionSwap;
   final bool showPLPercent;
   final bool confirmBeforeClose;
@@ -25,6 +26,7 @@ class AccountDetailScreen extends StatefulWidget {
     required this.onClosePosition,
     required this.onModifyPosition,
     required this.accountNames,
+    this.mainAccountNum,
     required this.includeCommissionSwap,
     required this.showPLPercent,
     required this.confirmBeforeClose,
@@ -230,36 +232,39 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
           onPressed: () => Navigator.pop(context),
         ),
       ),
-      body: ValueListenableBuilder<List<Map<String, dynamic>>>(
-        valueListenable: widget.accountsNotifier,
-        builder: (context, accounts, _) {
-          final account = _getCurrentAccount();
-          if (account == null) {
-            return const Center(
-              child: Text('Account not found', style: AppTextStyles.body),
-            );
-          }
-
-          return ValueListenableBuilder<List<Map<String, dynamic>>>(
-            valueListenable: widget.positionsNotifier,
-            builder: (context, _, __) {
-              final allPositions = _getAllPositionsForAccount();
-              final filteredPositions = _getFilteredPositions();
-              final pairCounts = _getPairCounts();
-              return SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _buildAccountInfoCard(account),
-                    const SizedBox(height: 24),
-                    _buildPositionsSection(allPositions, filteredPositions, pairCounts),
-                  ],
-                ),
+      body: SafeArea(
+        top: false, // AppBar handles top
+        child: ValueListenableBuilder<List<Map<String, dynamic>>>(
+          valueListenable: widget.accountsNotifier,
+          builder: (context, accounts, _) {
+            final account = _getCurrentAccount();
+            if (account == null) {
+              return const Center(
+                child: Text('Account not found', style: AppTextStyles.body),
               );
-            },
-          );
-        },
+            }
+
+            return ValueListenableBuilder<List<Map<String, dynamic>>>(
+              valueListenable: widget.positionsNotifier,
+              builder: (context, _, __) {
+                final allPositions = _getAllPositionsForAccount();
+                final filteredPositions = _getFilteredPositions();
+                final pairCounts = _getPairCounts();
+                return SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _buildAccountInfoCard(account),
+                      const SizedBox(height: 24),
+                      _buildPositionsSection(allPositions, filteredPositions, pairCounts),
+                    ],
+                  ),
+                );
+              },
+            );
+          },
+        ),
       ),
     );
   }
@@ -797,6 +802,7 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
           onClosePosition: widget.onClosePosition,
           onModifyPosition: widget.onModifyPosition,
           accountNames: widget.accountNames,
+          mainAccountNum: widget.mainAccountNum,
           includeCommissionSwap: widget.includeCommissionSwap,
           showPLPercent: widget.showPLPercent,
           confirmBeforeClose: widget.confirmBeforeClose,

@@ -167,47 +167,49 @@ class _LotSizingScreenState extends State<LotSizingScreen> {
           ),
         ],
       ),
-      body: widget.accounts.isEmpty
-          ? const Center(
-              child: Text(
-                'No accounts connected',
-                style: AppTextStyles.body,
-              ),
-            )
-          : SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Info card
-                  Container(
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: Colors.orange.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: Colors.orange.withOpacity(0.3)),
-                    ),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Icon(Icons.info_outline, 
-                          color: Colors.orange, 
-                          size: 18,
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            'Set up proportional lot sizing across accounts. '
-                            'Select a main account with base lot size (1.0), then set ratios for other accounts. '
-                            'Example: If main account has ratio 1.0 and another has 1.5, '
-                            'opening 0.1 lots will place 0.1 on main and 0.15 on the other.',
-                            style: TextStyle(
-                              color: Colors.orange.shade200,
-                              fontSize: 12,
-                              height: 1.4,
+      body: SafeArea(
+        top: false, // AppBar handles top
+        child: widget.accounts.isEmpty
+            ? const Center(
+                child: Text(
+                  'No accounts connected',
+                  style: AppTextStyles.body,
+                ),
+              )
+            : SingleChildScrollView(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Info card
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: Colors.orange.withOpacity(0.3)),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(Icons.info_outline, 
+                            color: Colors.orange, 
+                            size: 18,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              'Set up proportional lot sizing across accounts. '
+                              'Select a main account with base lot size (1.0), then set ratios for other accounts. '
+                              'Example: If main account has ratio 1.0 and another has 1.5, '
+                              'opening 0.1 lots will place 0.1 on main and 0.15 on the other.',
+                              style: TextStyle(
+                                color: Colors.orange.shade200,
+                                fontSize: 12,
+                                height: 1.4,
+                              ),
                             ),
                           ),
-                        ),
                       ],
                     ),
                   ),
@@ -434,9 +436,10 @@ class _LotSizingScreenState extends State<LotSizingScreen> {
                         ),
                       );
                     }),
-                ],
-              ),
+              ],
             ),
+          ),
+      ),
     );
   }
 }
