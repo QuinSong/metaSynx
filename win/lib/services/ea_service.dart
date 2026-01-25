@@ -8,7 +8,11 @@ class EAService {
   static String? _commonDataPath;
   
   Timer? _pollTimer;
+  Timer? _chartWatchTimer;
+  String? _lastChartContent;
+  
   Function(List<Map<String, dynamic>>)? onAccountsUpdated;
+  Function(Map<String, dynamic>)? onChartDataReceived;
   Function(String)? onLog;
 
   /// Initialize the EA service
@@ -200,6 +204,77 @@ class EAService {
     });
   }
 
+  /// Subscribe to chart updates - sends initial data then streams updates
+  Future<void> subscribeChart(String symbol, String timeframe, int terminalIndex) async {
+    onLog?.call('Subscribing to chart: $symbol $timeframe on terminal $terminalIndex');
+    
+    _lastChartContent = null;
+    
+    // Send subscribe command to EA
+    await sendCommandToTerminal(terminalIndex, {
+      'action': 'subscribe_chart',
+      'symbol': symbol,
+      'timeframe': timeframe,
+    });
+    
+    // Start watching chart file for updates
+    _startChartFileWatcher(terminalIndex);
+  }
+
+  /// Unsubscribe from chart updates
+  Future<void> unsubscribeChart(int terminalIndex) async {
+    onLog?.call('Unsubscribing from chart on terminal $terminalIndex');
+    
+    _stopChartFileWatcher();
+    
+    await sendCommandToTerminal(terminalIndex, {
+      'action': 'unsubscribe_chart',
+    });
+  }
+
+  /// Start watching chart file for updates
+  void _startChartFileWatcher(int terminalIndex) {
+    _stopChartFileWatcher();
+    _lastChartContent = null;
+    
+    // Poll chart file every 200ms for updates
+    _chartWatchTimer = Timer.periodic(const Duration(milliseconds: 200), (_) {
+      _checkChartFile(terminalIndex);
+    });
+  }
+
+  /// Stop watching chart file
+  void _stopChartFileWatcher() {
+    _chartWatchTimer?.cancel();
+    _chartWatchTimer = null;
+    _lastChartContent = null;
+  }
+
+  /// Check chart file for updates and forward to callback
+  Future<void> _checkChartFile(int terminalIndex) async {
+    if (_commonDataPath == null) return;
+    
+    final filePath = '$_commonDataPath\\Files\\$_bridgeFolder\\chart_$terminalIndex.json';
+    final file = File(filePath);
+    
+    if (!await file.exists()) return;
+    
+    try {
+      final content = await file.readAsString();
+      
+      // Skip if content hasn't changed or is empty
+      if (content == _lastChartContent || content.isEmpty) return;
+      
+      _lastChartContent = content;
+      final data = jsonDecode(content) as Map<String, dynamic>;
+      
+      // Forward chart data to callback
+      onChartDataReceived?.call(data);
+    } catch (e) {
+      // Ignore file read errors (file might be being written)
+    }
+  }
+
   /// Poll for account status updates
   Future<void> _pollAccountStatus() async {
     final accounts = await getAccounts();
@@ -225,5 +300,6 @@ class EAService {
 
   void dispose() {
     stopPolling();
+    _stopChartFileWatcher();
   }
 }

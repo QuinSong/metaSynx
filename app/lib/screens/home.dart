@@ -29,6 +29,8 @@ class _HomeScreenState extends State<HomeScreen> {
       ValueNotifier<List<Map<String, dynamic>>>([]);
   final ValueNotifier<List<Map<String, dynamic>>> _positionsNotifier =
       ValueNotifier<List<Map<String, dynamic>>>([]);
+  final ValueNotifier<Map<String, dynamic>?> _chartDataNotifier =
+      ValueNotifier<Map<String, dynamic>?>(null);
   Map<String, String> _accountNames = {};
   String? _mainAccountNum;
   Map<String, double> _lotRatios = {};
@@ -227,6 +229,11 @@ class _HomeScreenState extends State<HomeScreen> {
         _handleOrderResult(message);
         break;
 
+      case 'chart_data':
+        // Forward chart data to the notifier for ChartScreen to consume
+        _chartDataNotifier.value = message;
+        break;
+
       case 'pong':
         break;
     }
@@ -270,6 +277,22 @@ class _HomeScreenState extends State<HomeScreen> {
       'terminalIndex': terminalIndex,
       'sl': sl ?? -1,
       'tp': tp ?? -1,
+    });
+  }
+
+  void _subscribeChart(String symbol, String timeframe, int terminalIndex) {
+    _connection.send({
+      'action': 'subscribe_chart',
+      'symbol': symbol,
+      'timeframe': timeframe,
+      'terminalIndex': terminalIndex,
+    });
+  }
+
+  void _unsubscribeChart(int terminalIndex) {
+    _connection.send({
+      'action': 'unsubscribe_chart',
+      'terminalIndex': terminalIndex,
     });
   }
 
@@ -400,6 +423,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _stopAccountsRefresh();
     _accountsNotifier.dispose();
     _positionsNotifier.dispose();
+    _chartDataNotifier.dispose();
     super.dispose();
   }
 
@@ -531,6 +555,9 @@ class _HomeScreenState extends State<HomeScreen> {
           showPLPercent: _showPLPercent,
           confirmBeforeClose: _confirmBeforeClose,
           onConfirmBeforeCloseChanged: _updateConfirmBeforeClose,
+          chartDataNotifier: _chartDataNotifier,
+          onSubscribeChart: _subscribeChart,
+          onUnsubscribeChart: _unsubscribeChart,
         ),
       ),
     );

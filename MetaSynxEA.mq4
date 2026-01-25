@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "MetaSynx"
 #property link      ""
-#property version   "2.00"
+#property version   "2.10"
 #property strict
 
 //+------------------------------------------------------------------+
@@ -22,8 +22,14 @@ string g_commandFile;
 string g_responseFile;
 string g_statusFile;
 string g_positionsFile;
+string g_chartFile;
 int    g_terminalIndex = -1;
 string g_lastCommandHash = "";
+
+// Chart subscription state
+bool   g_chartSubscribed = false;
+string g_chartSymbol = "";
+int    g_chartTimeframe = PERIOD_M15;
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                    |
@@ -40,8 +46,9 @@ int OnInit()
    g_commandFile = BridgeFolder + "\\command_" + IntegerToString(g_terminalIndex) + ".json";
    g_responseFile = BridgeFolder + "\\response_" + IntegerToString(g_terminalIndex) + ".json";
    g_positionsFile = BridgeFolder + "\\positions_" + IntegerToString(g_terminalIndex) + ".json";
+   g_chartFile = BridgeFolder + "\\chart_" + IntegerToString(g_terminalIndex) + ".json";
    
-   Print("MetaSynx EA v2.00 initialized - Terminal Index: ", g_terminalIndex, " Account: ", AccountNumber());
+   Print("MetaSynx EA v2.10 initialized - Terminal Index: ", g_terminalIndex, " Account: ", AccountNumber());
    
    WriteAccountStatus();
    WritePositions();
@@ -59,6 +66,7 @@ void OnDeinit(const int reason)
    EventKillTimer();
    if(FileIsExist(g_statusFile, FILE_COMMON)) FileDelete(g_statusFile, FILE_COMMON);
    if(FileIsExist(g_positionsFile, FILE_COMMON)) FileDelete(g_positionsFile, FILE_COMMON);
+   if(FileIsExist(g_chartFile, FILE_COMMON)) FileDelete(g_chartFile, FILE_COMMON);
    Print("MetaSynx EA deinitialized");
 }
 
@@ -70,6 +78,12 @@ void OnTimer()
    CheckAndProcessCommands();
    WriteAccountStatus();
    WritePositions();
+   
+   // If chart is subscribed, update the current candle
+   if(g_chartSubscribed)
+   {
+      WriteChartUpdate();
+   }
 }
 
 //+------------------------------------------------------------------+
@@ -223,6 +237,107 @@ void WritePositions()
 }
 
 //+------------------------------------------------------------------+
+//| Write chart data (historical + current)                           |
+//+------------------------------------------------------------------+
+void WriteChartData(string symbol, int timeframe, int count)
+{
+   int digits = (int)MarketInfo(symbol, MODE_DIGITS);
+   
+   string json = "{";
+   json += "\"type\":\"history\",";
+   json += "\"symbol\":\"" + symbol + "\",";
+   json += "\"timeframe\":" + IntegerToString(timeframe) + ",";
+   json += "\"candles\":[";
+   
+   int available = iBars(symbol, timeframe);
+   int barsToGet = MathMin(count, available);
+   
+   bool first = true;
+   for(int i = barsToGet - 1; i >= 0; i--)
+   {
+      if(!first) json += ",";
+      first = false;
+      
+      datetime barTime = iTime(symbol, timeframe, i);
+      double open = iOpen(symbol, timeframe, i);
+      double high = iHigh(symbol, timeframe, i);
+      double low = iLow(symbol, timeframe, i);
+      double close = iClose(symbol, timeframe, i);
+      
+      json += "{";
+      json += "\"time\":" + IntegerToString((long)barTime) + ",";
+      json += "\"open\":" + DoubleToString(open, digits) + ",";
+      json += "\"high\":" + DoubleToString(high, digits) + ",";
+      json += "\"low\":" + DoubleToString(low, digits) + ",";
+      json += "\"close\":" + DoubleToString(close, digits);
+      json += "}";
+   }
+   
+   json += "]}";
+   
+   int handle = FileOpen(g_chartFile, FILE_WRITE|FILE_TXT|FILE_COMMON);
+   if(handle != INVALID_HANDLE)
+   {
+      FileWriteString(handle, json);
+      FileClose(handle);
+   }
+   
+   Print("Chart data written: ", symbol, " TF:", timeframe, " bars:", barsToGet);
+}
+
+//+------------------------------------------------------------------+
+//| Write chart update (current candle only)                          |
+//+------------------------------------------------------------------+
+void WriteChartUpdate()
+{
+   if(!g_chartSubscribed || g_chartSymbol == "") return;
+   
+   int digits = (int)MarketInfo(g_chartSymbol, MODE_DIGITS);
+   
+   datetime barTime = iTime(g_chartSymbol, g_chartTimeframe, 0);
+   double open = iOpen(g_chartSymbol, g_chartTimeframe, 0);
+   double high = iHigh(g_chartSymbol, g_chartTimeframe, 0);
+   double low = iLow(g_chartSymbol, g_chartTimeframe, 0);
+   double close = iClose(g_chartSymbol, g_chartTimeframe, 0);
+   
+   string json = "{";
+   json += "\"type\":\"update\",";
+   json += "\"symbol\":\"" + g_chartSymbol + "\",";
+   json += "\"timeframe\":" + IntegerToString(g_chartTimeframe) + ",";
+   json += "\"candle\":{";
+   json += "\"time\":" + IntegerToString((long)barTime) + ",";
+   json += "\"open\":" + DoubleToString(open, digits) + ",";
+   json += "\"high\":" + DoubleToString(high, digits) + ",";
+   json += "\"low\":" + DoubleToString(low, digits) + ",";
+   json += "\"close\":" + DoubleToString(close, digits);
+   json += "}}";
+   
+   int handle = FileOpen(g_chartFile, FILE_WRITE|FILE_TXT|FILE_COMMON);
+   if(handle != INVALID_HANDLE)
+   {
+      FileWriteString(handle, json);
+      FileClose(handle);
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Convert timeframe string to MT4 period                            |
+//+------------------------------------------------------------------+
+int StringToTimeframe(string tf)
+{
+   if(tf == "M1" || tf == "1") return PERIOD_M1;
+   if(tf == "M5" || tf == "5") return PERIOD_M5;
+   if(tf == "M15" || tf == "15") return PERIOD_M15;
+   if(tf == "M30" || tf == "30") return PERIOD_M30;
+   if(tf == "H1" || tf == "60") return PERIOD_H1;
+   if(tf == "H4" || tf == "240") return PERIOD_H4;
+   if(tf == "D1" || tf == "D") return PERIOD_D1;
+   if(tf == "W1" || tf == "W") return PERIOD_W1;
+   if(tf == "MN1" || tf == "MN") return PERIOD_MN1;
+   return PERIOD_M15;
+}
+
+//+------------------------------------------------------------------+
 //| Check and process commands                                        |
 //+------------------------------------------------------------------+
 void CheckAndProcessCommands()
@@ -284,6 +399,34 @@ void ProcessCommand(string jsonCommand)
       double tp = StringToDouble(ExtractJsonString(jsonCommand, "tp"));
       Print("MODIFY COMMAND: ticket=", ticket, " sl=", sl, " tp=", tp);
       ModifyPosition(ticket, sl, tp);
+   }
+   else if(action == "get_chart_data")
+   {
+      string symbol = ExtractJsonString(jsonCommand, "symbol");
+      string tf = ExtractJsonString(jsonCommand, "timeframe");
+      int count = (int)StringToInteger(ExtractJsonString(jsonCommand, "count"));
+      if(count <= 0) count = 200;
+      
+      int timeframe = StringToTimeframe(tf);
+      Print("CHART DATA: symbol=", symbol, " tf=", tf, " (", timeframe, ") count=", count);
+      WriteChartData(symbol, timeframe, count);
+   }
+   else if(action == "subscribe_chart")
+   {
+      g_chartSymbol = ExtractJsonString(jsonCommand, "symbol");
+      string tf = ExtractJsonString(jsonCommand, "timeframe");
+      g_chartTimeframe = StringToTimeframe(tf);
+      g_chartSubscribed = true;
+      Print("CHART SUBSCRIBE: symbol=", g_chartSymbol, " tf=", g_chartTimeframe);
+      
+      // Send initial data immediately
+      WriteChartData(g_chartSymbol, g_chartTimeframe, 200);
+   }
+   else if(action == "unsubscribe_chart")
+   {
+      g_chartSubscribed = false;
+      g_chartSymbol = "";
+      Print("CHART UNSUBSCRIBE");
    }
 }
 
