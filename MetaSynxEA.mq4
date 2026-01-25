@@ -416,11 +416,14 @@ void ProcessCommand(string jsonCommand)
       g_chartSymbol = ExtractJsonString(jsonCommand, "symbol");
       string tf = ExtractJsonString(jsonCommand, "timeframe");
       g_chartTimeframe = StringToTimeframe(tf);
-      g_chartSubscribed = true;
+      g_chartSubscribed = false;  // Don't start updates yet
       Print("CHART SUBSCRIBE: symbol=", g_chartSymbol, " tf=", g_chartTimeframe);
       
       // Send initial data immediately
       WriteChartData(g_chartSymbol, g_chartTimeframe, 200);
+      
+      // Delay enabling updates to ensure history is read first
+      g_chartSubscribed = true;
    }
    else if(action == "unsubscribe_chart")
    {

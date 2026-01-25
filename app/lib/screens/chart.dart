@@ -131,8 +131,25 @@ class _ChartScreenState extends State<ChartScreen> {
     if (_useMT4Data && _selectedAccountIndex != null) {
       _hasReceivedData = false;
       widget.onSubscribeChart!(_currentSymbol, _currentInterval, _selectedAccountIndex!);
+      
+      // Set a timeout - if no data after 5 seconds, show error
+      Future.delayed(const Duration(seconds: 5), () {
+        if (mounted && !_hasReceivedData && _isLoading) {
+          setState(() => _isLoading = false);
+          _controller.runJavaScript('''
+            document.getElementById('loading').innerHTML = 
+              'No data received from MT4.<br>Check that EA is running and symbol exists.';
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('loading').style.color = '#FF5252';
+          ''');
+        }
+      });
     } else {
       setState(() => _isLoading = false);
+      _controller.runJavaScript('''
+        document.getElementById('loading').innerHTML = 'MT4 connection not available';
+        document.getElementById('loading').style.color = '#FFA726';
+      ''');
     }
   }
 
@@ -508,10 +525,15 @@ class _ChartScreenState extends State<ChartScreen> {
       priceLabel.style.color = close >= open ? '#00E676' : '#FF5252';
     }
     
-    // Notify Flutter that chart is ready
-    if (window.ChartReady) {
-      window.ChartReady.postMessage('ready');
-    }
+    // Show loading state
+    document.getElementById('loading').style.display = 'block';
+    
+    // Notify Flutter that chart is ready after a small delay to ensure everything is loaded
+    setTimeout(function() {
+      if (window.ChartReady) {
+        window.ChartReady.postMessage('ready');
+      }
+    }, 100);
   </script>
 </body>
 </html>

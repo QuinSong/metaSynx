@@ -210,15 +210,59 @@ class EAService {
     
     _lastChartContent = null;
     
-    // Send subscribe command to EA
+    // Send subscribe command to EA - this will write history data
     await sendCommandToTerminal(terminalIndex, {
       'action': 'subscribe_chart',
       'symbol': symbol,
       'timeframe': timeframe,
     });
     
-    // Start watching chart file for updates
+    // Immediately read the chart file to get history data
+    // (before it gets overwritten by updates)
+    await _readChartFileOnce(terminalIndex);
+    
+    // Now start watching for updates
     _startChartFileWatcher(terminalIndex);
+  }
+  
+  /// Read chart file once (for initial history data)
+  Future<void> _readChartFileOnce(int terminalIndex) async {
+    if (_commonDataPath == null) return;
+    
+    final filePath = '$_commonDataPath\\Files\\$_bridgeFolder\\chart_$terminalIndex.json';
+    final file = File(filePath);
+    
+    // Try a few times in case file is still being written
+    for (int i = 0; i < 5; i++) {
+      if (!await file.exists()) {
+        await Future.delayed(const Duration(milliseconds: 100));
+        continue;
+      }
+      
+      try {
+        final content = await file.readAsString();
+        if (content.isEmpty) {
+          await Future.delayed(const Duration(milliseconds: 100));
+          continue;
+        }
+        
+        final data = jsonDecode(content) as Map<String, dynamic>;
+        
+        // Only forward if it's history data (has candles array)
+        if (data['type'] == 'history' && data['candles'] != null) {
+          _lastChartContent = content;
+          onChartDataReceived?.call(data);
+          onLog?.call('Chart history received: ${(data['candles'] as List).length} candles');
+          return;
+        }
+      } catch (e) {
+        // File might be being written, retry
+      }
+      
+      await Future.delayed(const Duration(milliseconds: 100));
+    }
+    
+    onLog?.call('Warning: Could not read chart history data');
   }
 
   /// Unsubscribe from chart updates

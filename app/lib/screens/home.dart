@@ -231,6 +231,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
       case 'chart_data':
         // Forward chart data to the notifier for ChartScreen to consume
+        debugPrint('Received chart_data: type=${message['type']}, candles=${(message['candles'] as List?)?.length ?? 0}');
         _chartDataNotifier.value = message;
         break;
 
@@ -281,6 +282,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _subscribeChart(String symbol, String timeframe, int terminalIndex) {
+    debugPrint('Subscribing to chart: $symbol $timeframe terminal=$terminalIndex');
     _connection.send({
       'action': 'subscribe_chart',
       'symbol': symbol,
