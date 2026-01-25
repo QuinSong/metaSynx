@@ -1,20 +1,16 @@
 import 'package:flutter/material.dart';
-import 'dart:async';
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/theme.dart';
 import '../utils/formatters.dart';
-import 'position_detail_screen.dart';
+import 'position.dart';
 
 class AccountDetailScreen extends StatefulWidget {
   final Map<String, dynamic> initialAccount;
   final ValueNotifier<List<Map<String, dynamic>>> accountsNotifier;
   final ValueNotifier<List<Map<String, dynamic>>> positionsNotifier;
-  final VoidCallback onRefreshPositions;
-  final VoidCallback onRefreshAllPositions;
   final void Function(int ticket, int terminalIndex) onClosePosition;
-  final void Function(int ticket, int terminalIndex, double? sl, double? tp)
-  onModifyPosition;
+  final void Function(int ticket, int terminalIndex, double? sl, double? tp) onModifyPosition;
   final Map<String, String> accountNames;
   final bool includeCommissionSwap;
   final bool showPLPercent;
@@ -26,8 +22,6 @@ class AccountDetailScreen extends StatefulWidget {
     required this.initialAccount,
     required this.accountsNotifier,
     required this.positionsNotifier,
-    required this.onRefreshPositions,
-    required this.onRefreshAllPositions,
     required this.onClosePosition,
     required this.onModifyPosition,
     required this.accountNames,
@@ -42,7 +36,6 @@ class AccountDetailScreen extends StatefulWidget {
 }
 
 class _AccountDetailScreenState extends State<AccountDetailScreen> {
-  Timer? _refreshTimer;
   late int _accountIndex;
   bool _positionsLoaded = false;
   Set<String> _selectedPairs = {};
@@ -72,20 +65,15 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
   void initState() {
     super.initState();
     _accountIndex = widget.initialAccount['index'] as int;
-
+    
     // Load saved filter preferences
     _loadFilterPrefs();
-
-    // Listen for positions updates
+    
+    // Listen for positions updates (data comes from home screen)
     widget.positionsNotifier.addListener(_onPositionsUpdated);
-
-    // Request positions immediately
-    widget.onRefreshPositions();
-
-    // Start periodic refresh
-    _refreshTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      widget.onRefreshPositions();
-    });
+    
+    // Initialize with current data
+    _onPositionsUpdated();
   }
 
   Future<void> _loadFilterPrefs() async {
@@ -115,16 +103,14 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
 
   void _onPositionsUpdated() {
     final positions = _getAllPositionsForAccount();
-    final currentPairs = positions
-        .map((p) => p['symbol'] as String? ?? '')
-        .toSet();
-
+    final currentPairs = positions.map((p) => p['symbol'] as String? ?? '').toSet();
+    
     // Initialize filters with all pairs selected on first load (minus previously deselected)
     if (!_filtersInitialized && positions.isNotEmpty) {
       setState(() {
         _allKnownPairs = Set.from(currentPairs);
         // Select all pairs except those previously deselected
-        _selectedPairs = _prefsLoaded
+        _selectedPairs = _prefsLoaded 
             ? currentPairs.difference(_deselectedPairs)
             : Set.from(currentPairs);
         _filtersInitialized = true;
@@ -141,11 +127,9 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
           _allKnownPairs.addAll(newPairs);
         });
       }
-
+      
       // Check if selected pairs have any positions left
-      final selectedPairsWithPositions = _selectedPairs.intersection(
-        currentPairs,
-      );
+      final selectedPairsWithPositions = _selectedPairs.intersection(currentPairs);
       if (selectedPairsWithPositions.isEmpty && currentPairs.isNotEmpty) {
         // No positions left on selected pairs - select all remaining pairs
         setState(() {
@@ -155,7 +139,7 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
         });
         _saveFilterPrefs();
       }
-
+      
       // Remove pairs from allKnownPairs that no longer have positions
       _allKnownPairs = _allKnownPairs.intersection(currentPairs);
       // Also clean up deselectedPairs
@@ -171,7 +155,6 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
 
   @override
   void dispose() {
-    _refreshTimer?.cancel();
     widget.positionsNotifier.removeListener(_onPositionsUpdated);
     super.dispose();
   }
@@ -196,21 +179,21 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
     final positions = _getAllPositionsForAccount()
         .where((p) => _selectedPairs.contains(p['symbol'] as String? ?? ''))
         .toList();
-
+    
     // Sort by symbol first, then by open time (most recent first)
     positions.sort((a, b) {
       final symbolA = a['symbol'] as String? ?? '';
       final symbolB = b['symbol'] as String? ?? '';
       final symbolCompare = symbolA.compareTo(symbolB);
-
+      
       if (symbolCompare != 0) return symbolCompare;
-
+      
       // Same symbol - sort by open time descending (most recent first)
       final timeA = a['openTime'] as String? ?? '';
       final timeB = b['openTime'] as String? ?? '';
       return timeB.compareTo(timeA);
     });
-
+    
     return positions;
   }
 
@@ -270,11 +253,7 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
                   children: [
                     _buildAccountInfoCard(account),
                     const SizedBox(height: 24),
-                    _buildPositionsSection(
-                      allPositions,
-                      filteredPositions,
-                      pairCounts,
-                    ),
+                    _buildPositionsSection(allPositions, filteredPositions, pairCounts),
                   ],
                 ),
               );
@@ -297,14 +276,13 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
     final server = account['server'] as String? ?? '';
     final currency = account['currency'] as String? ?? 'USD';
     final leverage = account['leverage'] as int? ?? 0;
-    final connected = account['connected'] as bool? ?? false;
     final openPositions = account['openPositions'] as int? ?? 0;
 
     // Calculate P/L from positions based on setting
-    final accountPositions = widget.positionsNotifier.value
-        .where((p) => p['terminalIndex'] == _accountIndex)
-        .toList();
-
+    final accountPositions = widget.positionsNotifier.value.where(
+      (p) => p['terminalIndex'] == _accountIndex
+    ).toList();
+    
     double profit = 0;
     for (final pos in accountPositions) {
       final rawProfit = (pos['profit'] as num?)?.toDouble() ?? 0;
@@ -346,9 +324,7 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
                 Expanded(child: _buildMainStat('Balance', balance, currency)),
                 Expanded(child: _buildMainStat('Equity', equity, currency)),
                 Icon(
-                  _accountDetailsExpanded
-                      ? Icons.expand_less
-                      : Icons.expand_more,
+                  _accountDetailsExpanded ? Icons.expand_less : Icons.expand_more,
                   color: AppColors.textSecondary,
                 ),
               ],
@@ -369,9 +345,7 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    widget.includeCommissionSwap
-                        ? 'Net Floating P/L'
-                        : 'Floating P/L',
+                    widget.includeCommissionSwap ? 'Net Floating P/L' : 'Floating P/L',
                     style: AppTextStyles.body,
                   ),
                   Column(
@@ -380,9 +354,7 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
                       Text(
                         '${Formatters.formatCurrencyWithSign(profit)} $currency',
                         style: TextStyle(
-                          color: profit >= 0
-                              ? AppColors.primary
-                              : AppColors.error,
+                          color: profit >= 0 ? AppColors.primary : AppColors.error,
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
                         ),
@@ -392,11 +364,9 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
                         Text(
                           '${((profit / balance) * 100).toStringAsFixed(2)}%',
                           style: TextStyle(
-                            color: profit == 0
-                                ? Colors.white
-                                : (profit > 0
-                                      ? AppColors.primary
-                                      : AppColors.error),
+                            color: profit == 0 
+                                ? Colors.white 
+                                : (profit > 0 ? AppColors.primary : AppColors.error),
                             fontSize: 14,
                             fontWeight: FontWeight.bold,
                           ),
@@ -417,9 +387,7 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
               // Account number and name
               Row(
                 children: [
-                  Expanded(
-                    child: _buildDetailItem('Account Number', accountNum),
-                  ),
+                  Expanded(child: _buildDetailItem('Account Number', accountNum)),
                   Expanded(child: _buildDetailItem('Account Name', brokerName)),
                 ],
               ),
@@ -435,40 +403,21 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
               // Details grid
               Row(
                 children: [
-                  Expanded(
-                    child: _buildDetailItem(
-                      'Free Margin',
-                      '${Formatters.formatCurrency(freeMargin)} $currency',
-                    ),
-                  ),
-                  Expanded(
-                    child: _buildDetailItem(
-                      'Used Margin',
-                      '${Formatters.formatCurrency(margin)} $currency',
-                    ),
-                  ),
+                  Expanded(child: _buildDetailItem('Free Margin', '${Formatters.formatCurrency(freeMargin)} $currency')),
+                  Expanded(child: _buildDetailItem('Used Margin', '${Formatters.formatCurrency(margin)} $currency')),
                 ],
               ),
               const SizedBox(height: 12),
               Row(
                 children: [
-                  Expanded(
-                    child: _buildDetailItem(
-                      'Margin Level',
-                      marginLevel > 0
-                          ? '${marginLevel.toStringAsFixed(1)}%'
-                          : '-',
-                    ),
-                  ),
+                  Expanded(child: _buildDetailItem('Margin Level', marginLevel > 0 ? '${marginLevel.toStringAsFixed(1)}%' : '-')),
                   Expanded(child: _buildDetailItem('Leverage', '1:$leverage')),
                 ],
               ),
               const SizedBox(height: 12),
               Row(
                 children: [
-                  Expanded(
-                    child: _buildDetailItem('Open Positions', '$openPositions'),
-                  ),
+                  Expanded(child: _buildDetailItem('Open Positions', '$openPositions')),
                   Expanded(child: _buildDetailItem('Currency', currency)),
                 ],
               ),
@@ -485,7 +434,7 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
     Map<String, int> pairCounts,
   ) {
     final sortedPairs = pairCounts.keys.toList()..sort();
-
+    
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -498,7 +447,7 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
             ),
           ],
         ),
-
+        
         // Pair filter chips
         if (_positionsLoaded && pairCounts.isNotEmpty) ...[
           const SizedBox(height: 12),
@@ -522,13 +471,10 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
                   _saveFilterPrefs();
                 },
                 child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 6,
-                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(
-                    color: isSelected
-                        ? AppColors.primaryWithOpacity(0.2)
+                    color: isSelected 
+                        ? AppColors.primaryWithOpacity(0.2) 
                         : AppColors.surface,
                     borderRadius: BorderRadius.circular(16),
                     border: Border.all(
@@ -541,31 +487,24 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
                       Text(
                         pair,
                         style: TextStyle(
-                          color: isSelected
-                              ? AppColors.primary
-                              : AppColors.textSecondary,
+                          color: isSelected ? AppColors.primary : AppColors.textSecondary,
                           fontSize: 12,
                           fontWeight: FontWeight.w500,
                         ),
                       ),
                       const SizedBox(width: 6),
                       Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 6,
-                          vertical: 2,
-                        ),
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
-                          color: isSelected
-                              ? AppColors.primary
+                          color: isSelected 
+                              ? AppColors.primary 
                               : AppColors.textSecondary.withOpacity(0.3),
                           borderRadius: BorderRadius.circular(10),
                         ),
                         child: Text(
                           '$count',
                           style: TextStyle(
-                            color: isSelected
-                                ? Colors.black
-                                : AppColors.textSecondary,
+                            color: isSelected ? Colors.black : AppColors.textSecondary,
                             fontSize: 10,
                             fontWeight: FontWeight.bold,
                           ),
@@ -578,9 +517,9 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
             }).toList(),
           ),
         ],
-
+        
         const SizedBox(height: 16),
-
+        
         if (!_positionsLoaded)
           Container(
             padding: const EdgeInsets.all(32),
@@ -615,11 +554,7 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
             child: const Center(
               child: Column(
                 children: [
-                  Icon(
-                    Icons.inbox_outlined,
-                    size: 48,
-                    color: AppColors.textSecondary,
-                  ),
+                  Icon(Icons.inbox_outlined, size: 48, color: AppColors.textSecondary),
                   SizedBox(height: 12),
                   Text('No open positions', style: AppTextStyles.body),
                 ],
@@ -636,11 +571,7 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
             child: const Center(
               child: Column(
                 children: [
-                  Icon(
-                    Icons.filter_list_off,
-                    size: 48,
-                    color: AppColors.textSecondary,
-                  ),
+                  Icon(Icons.filter_list_off, size: 48, color: AppColors.textSecondary),
                   SizedBox(height: 12),
                   Text('No positions match filter', style: AppTextStyles.body),
                 ],
@@ -668,16 +599,16 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
     final openTime = position['openTime'] as String? ?? '';
 
     final isBuy = type.toLowerCase() == 'buy';
-    final displayProfit = widget.includeCommissionSwap
-        ? profit + swap + commission
+    final displayProfit = widget.includeCommissionSwap 
+        ? profit + swap + commission 
         : profit;
     final digits = _detectDigits(openPrice);
-
+    
     // Get account balance for P/L %
     final account = _getCurrentAccount();
     final balance = (account?['balance'] as num?)?.toDouble() ?? 0;
     final plPercent = balance > 0 ? (displayProfit / balance) * 100 : 0.0;
-
+    
     final isExpanded = _expandedPositions.contains(ticket);
 
     return Container(
@@ -723,14 +654,9 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
                           ),
                           const SizedBox(width: 12),
                           Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 4,
-                            ),
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                             decoration: BoxDecoration(
-                              color: isBuy
-                                  ? AppColors.primary
-                                  : AppColors.error,
+                              color: isBuy ? AppColors.primary : AppColors.error,
                               borderRadius: BorderRadius.circular(4),
                             ),
                             child: Text(
@@ -749,16 +675,10 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
                       Row(
                         children: [
                           Expanded(
-                            child: _buildPriceItem(
-                              'Open',
-                              openPrice.toStringAsFixed(digits),
-                            ),
+                            child: _buildPriceItem('Open', openPrice.toStringAsFixed(digits)),
                           ),
                           Expanded(
-                            child: _buildPriceItem(
-                              'Current',
-                              currentPrice.toStringAsFixed(digits),
-                            ),
+                            child: _buildPriceItem('Current', currentPrice.toStringAsFixed(digits)),
                           ),
                         ],
                       ),
@@ -770,16 +690,10 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
                         Row(
                           children: [
                             Expanded(
-                              child: _buildPriceItem(
-                                'SL',
-                                sl > 0 ? sl.toStringAsFixed(digits) : '-',
-                              ),
+                              child: _buildPriceItem('SL', sl > 0 ? sl.toStringAsFixed(digits) : '-'),
                             ),
                             Expanded(
-                              child: _buildPriceItem(
-                                'TP',
-                                tp > 0 ? tp.toStringAsFixed(digits) : '-',
-                              ),
+                              child: _buildPriceItem('TP', tp > 0 ? tp.toStringAsFixed(digits) : '-'),
                             ),
                           ],
                         ),
@@ -796,11 +710,7 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
                 behavior: HitTestBehavior.opaque,
                 onTap: () => _openPositionDetail(position),
                 child: Padding(
-                  padding: const EdgeInsets.only(
-                    right: 16,
-                    top: 16,
-                    bottom: 16,
-                  ),
+                  padding: const EdgeInsets.only(right: 16, top: 16, bottom: 16),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
@@ -817,11 +727,7 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
                             ),
                           ),
                           const SizedBox(width: 4),
-                          const Icon(
-                            Icons.chevron_right,
-                            color: AppColors.textSecondary,
-                            size: 22,
-                          ),
+                          const Icon(Icons.chevron_right, color: AppColors.textSecondary, size: 22),
                         ],
                       ),
                       const SizedBox(height: 12),
@@ -831,21 +737,16 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
                         children: [
                           Text(
                             widget.includeCommissionSwap ? 'Net P/L' : 'P/L',
-                            style: const TextStyle(
-                              color: AppColors.textSecondary,
-                              fontSize: 11,
-                            ),
+                            style: const TextStyle(color: AppColors.textSecondary, fontSize: 11),
                           ),
                           if (widget.showPLPercent && balance > 0) ...[
                             const SizedBox(width: 8),
                             Text(
                               '${plPercent.toStringAsFixed(2)}%',
                               style: TextStyle(
-                                color: displayProfit == 0
-                                    ? Colors.white
-                                    : (displayProfit > 0
-                                          ? AppColors.primary
-                                          : AppColors.error),
+                                color: displayProfit == 0 
+                                    ? Colors.white 
+                                    : (displayProfit > 0 ? AppColors.primary : AppColors.error),
                                 fontSize: 11,
                               ),
                             ),
@@ -855,9 +756,7 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
                       Text(
                         Formatters.formatCurrencyWithSign(displayProfit),
                         style: TextStyle(
-                          color: displayProfit >= 0
-                              ? AppColors.primary
-                              : AppColors.error,
+                          color: displayProfit >= 0 ? AppColors.primary : AppColors.error,
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
                         ),
@@ -869,17 +768,11 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
                         const SizedBox(height: 12),
                         Text(
                           openTime,
-                          style: const TextStyle(
-                            color: AppColors.textMuted,
-                            fontSize: 11,
-                          ),
+                          style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
                         ),
                         Text(
                           '#$ticket',
-                          style: const TextStyle(
-                            color: AppColors.textMuted,
-                            fontSize: 11,
-                          ),
+                          style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
                         ),
                       ],
                     ],
@@ -903,7 +796,6 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
           accounts: widget.accountsNotifier.value,
           onClosePosition: widget.onClosePosition,
           onModifyPosition: widget.onModifyPosition,
-          onRefreshAllPositions: widget.onRefreshAllPositions,
           accountNames: widget.accountNames,
           includeCommissionSwap: widget.includeCommissionSwap,
           showPLPercent: widget.showPLPercent,
@@ -918,11 +810,11 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        Text(label, style: const TextStyle(color: AppColors.textSecondary, fontSize: 11)),
         Text(
-          label,
-          style: const TextStyle(color: AppColors.textSecondary, fontSize: 11),
+          value,
+          style: const TextStyle(color: Colors.white, fontSize: 14),
         ),
-        Text(value, style: const TextStyle(color: Colors.white, fontSize: 14)),
       ],
     );
   }
@@ -941,10 +833,7 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
             fontWeight: FontWeight.bold,
           ),
         ),
-        Text(
-          currency,
-          style: const TextStyle(color: AppColors.textSecondary, fontSize: 11),
-        ),
+        Text(currency, style: const TextStyle(color: AppColors.textSecondary, fontSize: 11)),
       ],
     );
   }
@@ -953,18 +842,11 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          label,
-          style: const TextStyle(color: AppColors.textSecondary, fontSize: 11),
-        ),
+        Text(label, style: const TextStyle(color: AppColors.textSecondary, fontSize: 11)),
         const SizedBox(height: 2),
         Text(
           value,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 15,
-            fontWeight: FontWeight.w500,
-          ),
+          style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w500),
         ),
       ],
     );

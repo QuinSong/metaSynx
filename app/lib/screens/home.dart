@@ -7,11 +7,11 @@ import '../services/relay_connection.dart' as relay;
 import '../components/connection_card.dart';
 import '../components/scan_button.dart';
 import '../utils/formatters.dart';
-import 'qr_scanner_screen.dart';
-import 'new_order_screen.dart';
-import 'account_detail_screen.dart';
-import 'account_settings_screen.dart';
-import 'chart_screen.dart';
+import 'qr_scanner.dart';
+import 'new_order.dart';
+import 'account.dart';
+import 'settings.dart';
+import 'chart.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -33,6 +33,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _mainAccountNum;
   Map<String, double> _lotRatios = {};
   Map<String, String> _symbolSuffixes = {};
+  Set<String> _preferredPairs = {};
   bool _includeCommissionSwap = false;
   bool _showPLPercent = false;
   bool _confirmBeforeClose = true;
@@ -72,6 +73,13 @@ class _HomeScreenState extends State<HomeScreen> {
     final suffixesJson = prefs.getString('symbol_suffixes');
     if (suffixesJson != null) {
       _symbolSuffixes = Map<String, String>.from(jsonDecode(suffixesJson));
+    }
+    
+    // Load preferred pairs
+    final pairsJson = prefs.getString('preferred_pairs');
+    if (pairsJson != null) {
+      final List<dynamic> decoded = jsonDecode(pairsJson);
+      _preferredPairs = decoded.map((e) => e.toString()).toSet();
     }
     
     // Load include commission/swap setting
@@ -240,13 +248,6 @@ class _HomeScreenState extends State<HomeScreen> {
     _connection.send({'action': 'get_accounts'});
   }
 
-  void _requestPositions(int targetIndex) {
-    _connection.send({
-      'action': 'get_positions',
-      'targetIndex': targetIndex,
-    });
-  }
-
   void _requestAllPositions() {
     _connection.send({
       'action': 'get_positions',
@@ -273,7 +274,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _openAccountDetail(Map<String, dynamic> account) {
-    final accountIndex = account['index'] as int;
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -281,8 +281,6 @@ class _HomeScreenState extends State<HomeScreen> {
           initialAccount: account,
           accountsNotifier: _accountsNotifier,
           positionsNotifier: _positionsNotifier,
-          onRefreshPositions: () => _requestPositions(accountIndex),
-          onRefreshAllPositions: _requestAllPositions,
           onClosePosition: _closePosition,
           onModifyPosition: _modifyPosition,
           accountNames: _accountNames,
@@ -304,6 +302,7 @@ class _HomeScreenState extends State<HomeScreen> {
           accountNames: _accountNames,
           mainAccountNum: _mainAccountNum,
           lotRatios: _lotRatios,
+          preferredPairs: _preferredPairs,
           onPlaceOrder: _placeOrder,
         ),
       ),
@@ -509,7 +508,6 @@ class _HomeScreenState extends State<HomeScreen> {
           accounts: _accountsNotifier.value,
           onClosePosition: _closePosition,
           onModifyPosition: _modifyPosition,
-          onRefreshAllPositions: _requestAllPositions,
           accountNames: _accountNames,
           includeCommissionSwap: _includeCommissionSwap,
           showPLPercent: _showPLPercent,
@@ -524,12 +522,13 @@ class _HomeScreenState extends State<HomeScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => AccountSettingsScreen(
+        builder: (context) => SettingsScreen(
           accounts: _accountsNotifier.value,
           accountNames: _accountNames,
           mainAccountNum: _mainAccountNum,
           lotRatios: _lotRatios,
           symbolSuffixes: _symbolSuffixes,
+          preferredPairs: _preferredPairs,
           includeCommissionSwap: _includeCommissionSwap,
           showPLPercent: _showPLPercent,
           confirmBeforeClose: _confirmBeforeClose,
@@ -551,6 +550,11 @@ class _HomeScreenState extends State<HomeScreen> {
           onSymbolSuffixesUpdated: (suffixes) {
             setState(() {
               _symbolSuffixes = suffixes;
+            });
+          },
+          onPreferredPairsUpdated: (pairs) {
+            setState(() {
+              _preferredPairs = pairs;
             });
           },
           onIncludeCommissionSwapUpdated: (value) {

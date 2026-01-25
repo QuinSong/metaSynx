@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../core/theme.dart';
+import '../../core/theme.dart';
 
 class LotSizingScreen extends StatefulWidget {
   final List<Map<String, dynamic>> accounts;
@@ -151,7 +151,7 @@ class _LotSizingScreenState extends State<LotSizingScreen> {
         backgroundColor: AppColors.background,
         title: const Text('Lot Sizing', style: TextStyle(color: Colors.white)),
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          icon: const Icon(Icons.chevron_left, color: Colors.white),
           onPressed: () => Navigator.pop(context),
         ),
         actions: [
@@ -183,26 +183,26 @@ class _LotSizingScreenState extends State<LotSizingScreen> {
                   Container(
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
-                      color: AppColors.surface,
+                      color: Colors.orange.withOpacity(0.1),
                       borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: AppColors.border),
+                      border: Border.all(color: Colors.orange.withOpacity(0.3)),
                     ),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Icon(Icons.info_outline, 
-                          color: AppColors.textSecondary.withOpacity(0.7), 
+                          color: Colors.orange, 
                           size: 18,
                         ),
                         const SizedBox(width: 10),
-                        const Expanded(
+                        Expanded(
                           child: Text(
                             'Set up proportional lot sizing across accounts. '
                             'Select a main account with base lot size (1.0), then set ratios for other accounts. '
                             'Example: If main account has ratio 1.0 and another has 1.5, '
                             'opening 0.1 lots will place 0.1 on main and 0.15 on the other.',
                             style: TextStyle(
-                              color: AppColors.textSecondary,
+                              color: Colors.orange.shade200,
                               fontSize: 12,
                               height: 1.4,
                             ),

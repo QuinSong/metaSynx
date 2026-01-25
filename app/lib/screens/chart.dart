@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../core/theme.dart';
-import 'position_detail_screen.dart';
+import 'position.dart';
 
 class ChartScreen extends StatefulWidget {
   final List<Map<String, dynamic>> positions;
@@ -10,7 +10,6 @@ class ChartScreen extends StatefulWidget {
   final String? initialSymbol;
   final void Function(int ticket, int terminalIndex) onClosePosition;
   final void Function(int ticket, int terminalIndex, double? sl, double? tp) onModifyPosition;
-  final VoidCallback onRefreshAllPositions;
   final Map<String, String> accountNames;
   final bool includeCommissionSwap;
   final bool showPLPercent;
@@ -25,7 +24,6 @@ class ChartScreen extends StatefulWidget {
     this.initialSymbol,
     required this.onClosePosition,
     required this.onModifyPosition,
-    required this.onRefreshAllPositions,
     required this.accountNames,
     required this.includeCommissionSwap,
     required this.showPLPercent,
@@ -124,7 +122,6 @@ class _ChartScreenState extends State<ChartScreen> {
           accounts: widget.accounts,
           onClosePosition: widget.onClosePosition,
           onModifyPosition: widget.onModifyPosition,
-          onRefreshAllPositions: widget.onRefreshAllPositions,
           accountNames: widget.accountNames,
           includeCommissionSwap: widget.includeCommissionSwap,
           showPLPercent: widget.showPLPercent,
@@ -177,13 +174,6 @@ class _ChartScreenState extends State<ChartScreen> {
       final terminalIndex = _parseInt(p['terminalIndex']);
       return terminalIndex == _selectedAccountIndex;
     }).toList();
-  }
-
-  String _getAccountName(int index) {
-    if (index < 0 || index >= widget.accounts.length) return 'Account $index';
-    final account = widget.accounts[index];
-    final accountNum = account['account']?.toString() ?? '';
-    return widget.accountNames[accountNum] ?? accountNum;
   }
 
   String _buildPositionLinesJs() {

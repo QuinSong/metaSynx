@@ -1,18 +1,14 @@
 import 'package:flutter/material.dart';
-import 'dart:async';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../core/theme.dart';
 import '../utils/formatters.dart';
-import 'chart_screen.dart';
+import 'chart.dart';
 
 class PositionDetailScreen extends StatefulWidget {
   final Map<String, dynamic> position;
   final ValueNotifier<List<Map<String, dynamic>>> positionsNotifier;
   final List<Map<String, dynamic>> accounts;
   final void Function(int ticket, int terminalIndex) onClosePosition;
-  final void Function(int ticket, int terminalIndex, double? sl, double? tp)
-  onModifyPosition;
-  final VoidCallback onRefreshAllPositions;
+  final void Function(int ticket, int terminalIndex, double? sl, double? tp) onModifyPosition;
   final Map<String, String> accountNames;
   final bool includeCommissionSwap;
   final bool showPLPercent;
@@ -26,7 +22,6 @@ class PositionDetailScreen extends StatefulWidget {
     required this.accounts,
     required this.onClosePosition,
     required this.onModifyPosition,
-    required this.onRefreshAllPositions,
     required this.accountNames,
     required this.includeCommissionSwap,
     required this.showPLPercent,
@@ -42,13 +37,12 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
   Set<int> _selectedTerminalIndices = {};
   Set<int> _knownTerminalIndices = {};
   bool _initialized = false;
-
+  
   final _slController = TextEditingController();
   final _tpController = TextEditingController();
   bool _isProcessing = false;
-  Timer? _refreshTimer;
   int _digits = 5; // Default to 5 decimal places
-
+  
   // Track original SL/TP to detect modifications
   String _originalSL = '';
   String _originalTP = '';
@@ -57,10 +51,10 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
   @override
   void initState() {
     super.initState();
-
+    
     // Detect digits from open price
     _digits = _detectDigits(widget.position['openPrice']);
-
+    
     // Pre-fill SL/TP from current position using detected digits
     final sl = (widget.position['sl'] as num?)?.toDouble() ?? 0;
     final tp = (widget.position['tp'] as num?)?.toDouble() ?? 0;
@@ -72,31 +66,28 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
       _tpController.text = tp.toStringAsFixed(_digits);
       _originalTP = _tpController.text;
     }
-
+    
     // Listen to SL/TP changes to detect modifications
     _slController.addListener(_checkForModifications);
     _tpController.addListener(_checkForModifications);
-
+    
     // Initialize with the original position's terminal
     final originalTerminal = widget.position['terminalIndex'] as int;
     _selectedTerminalIndices.add(originalTerminal);
     _knownTerminalIndices.add(originalTerminal);
-
-    // Listen to position updates
+    
+    // Listen to position updates (data comes from home screen)
     widget.positionsNotifier.addListener(_onPositionsUpdated);
-
-    // Start refresh timer
-    widget.onRefreshAllPositions();
-    _refreshTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      widget.onRefreshAllPositions();
-    });
+    
+    // Initialize with current data
+    _onPositionsUpdated();
   }
-
+  
   void _checkForModifications() {
     final slChanged = _slController.text != _originalSL;
     final tpChanged = _tpController.text != _originalTP;
     final hasModifications = slChanged || tpChanged;
-
+    
     if (hasModifications != _hasModifications) {
       setState(() {
         _hasModifications = hasModifications;
@@ -107,27 +98,27 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
   /// Detect number of decimal places from a price value
   int _detectDigits(dynamic price) {
     if (price == null) return 5;
-
+    
     final priceStr = price.toString();
     final dotIndex = priceStr.indexOf('.');
     if (dotIndex < 0) return 0;
-
+    
     // Count digits after decimal, ignoring trailing zeros
     final decimals = priceStr.substring(dotIndex + 1);
-
+    
     // For forex pairs, typically 5 or 3 digits
     // For metals/indices, typically 2-3 digits
     // For crypto, can vary widely
-
+    
     // Use the actual decimal places from the price
     int digits = decimals.length;
-
+    
     // Common patterns:
     // EURUSD: 1.12345 = 5 digits
-    // USDJPY: 150.123 = 3 digits
+    // USDJPY: 150.123 = 3 digits  
     // XAUUSD: 2650.12 = 2 digits
     // BTCUSD: 45000.00 = 2 digits
-
+    
     // Cap at reasonable max
     return digits.clamp(0, 8);
   }
@@ -139,10 +130,8 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
 
   void _onPositionsUpdated() {
     final matching = _findMatchingPositions();
-    final currentTerminals = matching
-        .map((p) => p['terminalIndex'] as int)
-        .toSet();
-
+    final currentTerminals = matching.map((p) => p['terminalIndex'] as int).toSet();
+    
     if (!_initialized && matching.isNotEmpty) {
       // First time we get matching positions - select all
       setState(() {
@@ -163,8 +152,8 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
   }
 
   @override
+  @override
   void dispose() {
-    _refreshTimer?.cancel();
     widget.positionsNotifier.removeListener(_onPositionsUpdated);
     _slController.removeListener(_checkForModifications);
     _tpController.removeListener(_checkForModifications);
@@ -184,7 +173,7 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
       // No magic number - this position stands alone
       return widget.positionsNotifier.value.where((p) {
         return p['terminalIndex'] == widget.position['terminalIndex'] &&
-            p['ticket'] == widget.position['ticket'];
+               p['ticket'] == widget.position['ticket'];
       }).toList();
     }
 
@@ -192,7 +181,7 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
     return widget.positionsNotifier.value.where((p) {
       if (p['symbol'] != symbol) return false;
       if (p['type'] != type) return false;
-
+      
       final posMagic = p['magic'] as int?;
       return posMagic == magic;
     }).toList();
@@ -202,7 +191,7 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
     // Get updated position data for the original position
     final terminalIndex = widget.position['terminalIndex'] as int;
     final ticket = widget.position['ticket'] as int;
-
+    
     try {
       return widget.positionsNotifier.value.firstWhere(
         (p) => p['terminalIndex'] == terminalIndex && p['ticket'] == ticket,
@@ -244,13 +233,11 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
 
     // Get all positions to close
     final positionsToClose = <Map<String, int>>[];
-
+    
     // First, try to find matching positions
     final matching = _findMatchingPositions();
     for (final terminalIndex in _selectedTerminalIndices) {
-      final pos = matching
-          .where((p) => p['terminalIndex'] == terminalIndex)
-          .firstOrNull;
+      final pos = matching.where((p) => p['terminalIndex'] == terminalIndex).firstOrNull;
       if (pos != null) {
         positionsToClose.add({
           'ticket': pos['ticket'] as int,
@@ -258,7 +245,7 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
         });
       }
     }
-
+    
     // If no matches found, use the original position
     if (positionsToClose.isEmpty) {
       final origTerminal = widget.position['terminalIndex'] as int;
@@ -298,7 +285,7 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
     final symbol = widget.position['symbol'] as String? ?? '';
     final count = _selectedTerminalIndices.length;
     final positionLabel = count == 1 ? 'position' : 'positions';
-
+    
     final result = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
@@ -401,7 +388,7 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
         ),
       ),
     );
-
+    
     return result ?? false;
   }
 
@@ -453,13 +440,11 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
 
     // Get all positions to modify
     final positionsToModify = <Map<String, int>>[];
-
+    
     // First, try to find matching positions
     final matching = _findMatchingPositions();
     for (final terminalIndex in _selectedTerminalIndices) {
-      final pos = matching
-          .where((p) => p['terminalIndex'] == terminalIndex)
-          .firstOrNull;
+      final pos = matching.where((p) => p['terminalIndex'] == terminalIndex).firstOrNull;
       if (pos != null) {
         positionsToModify.add({
           'ticket': pos['ticket'] as int,
@@ -467,7 +452,7 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
         });
       }
     }
-
+    
     // If no matches found, use the original position
     if (positionsToModify.isEmpty) {
       final origTerminal = widget.position['terminalIndex'] as int;
@@ -503,42 +488,27 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
 
   void _showError(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), backgroundColor: Colors.red.shade700),
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red.shade700,
+      ),
     );
   }
 
   String _stripSuffix(String symbol) {
     // Common base symbols - if symbol starts with one of these, strip anything after
     final baseSymbols = [
-      'XAUUSD',
-      'XAGUSD',
-      'EURUSD',
-      'GBPUSD',
-      'USDJPY',
-      'USDCHF',
-      'USDCAD',
-      'AUDUSD',
-      'NZDUSD',
-      'EURGBP',
-      'EURJPY',
-      'GBPJPY',
-      'BTCUSD',
-      'ETHUSD',
-      'US30',
-      'US500',
-      'NAS100',
-      'UK100',
-      'GER40',
-      'FRA40',
-      'JPN225',
+      'XAUUSD', 'XAGUSD', 'EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF', 'USDCAD',
+      'AUDUSD', 'NZDUSD', 'EURGBP', 'EURJPY', 'GBPJPY', 'BTCUSD', 'ETHUSD',
+      'US30', 'US500', 'NAS100', 'UK100', 'GER40', 'FRA40', 'JPN225',
     ];
-
+    
     for (final base in baseSymbols) {
       if (symbol.toUpperCase().startsWith(base)) {
         return base;
       }
     }
-
+    
     // If no known base found, try to strip common suffixes
     final suffixPatterns = ['.', '-', '_', '#'];
     for (final pattern in suffixPatterns) {
@@ -547,14 +517,14 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
         return symbol.substring(0, index);
       }
     }
-
+    
     return symbol;
   }
 
   void _openChart() {
     final symbol = widget.position['symbol'] as String? ?? '';
     final cleanSymbol = _stripSuffix(symbol);
-
+    
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -565,7 +535,6 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
           initialSymbol: cleanSymbol,
           onClosePosition: widget.onClosePosition,
           onModifyPosition: widget.onModifyPosition,
-          onRefreshAllPositions: widget.onRefreshAllPositions,
           accountNames: widget.accountNames,
           includeCommissionSwap: widget.includeCommissionSwap,
           showPLPercent: widget.showPLPercent,
@@ -581,7 +550,7 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
     // Get account display name for appbar
     final terminalIndex = widget.position['terminalIndex'] as int? ?? -1;
     final accountDisplayName = _getAccountDisplay(terminalIndex);
-
+    
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
@@ -598,10 +567,7 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
           Padding(
             padding: const EdgeInsets.only(right: 8),
             child: IconButton(
-              icon: const Icon(
-                Icons.candlestick_chart,
-                color: AppColors.primary,
-              ),
+              icon: const Icon(Icons.candlestick_chart, color: AppColors.primary),
               onPressed: () => _openChart(),
             ),
           ),
@@ -612,7 +578,7 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
         builder: (context, allPositions, _) {
           final currentPos = _getCurrentPosition();
           final matchingPositions = _findMatchingPositions();
-
+          
           if (currentPos == null) {
             return const Center(
               child: Text('Position closed', style: AppTextStyles.body),
@@ -623,17 +589,15 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
           final type = currentPos['type'] as String? ?? '';
           final lots = (currentPos['lots'] as num?)?.toDouble() ?? 0;
           final openPrice = (currentPos['openPrice'] as num?)?.toDouble() ?? 0;
-          final currentPrice =
-              (currentPos['currentPrice'] as num?)?.toDouble() ?? 0;
+          final currentPrice = (currentPos['currentPrice'] as num?)?.toDouble() ?? 0;
           final rawProfit = (currentPos['profit'] as num?)?.toDouble() ?? 0;
           final swap = (currentPos['swap'] as num?)?.toDouble() ?? 0;
-          final commission =
-              (currentPos['commission'] as num?)?.toDouble() ?? 0;
-          final profit = widget.includeCommissionSwap
-              ? rawProfit + swap + commission
+          final commission = (currentPos['commission'] as num?)?.toDouble() ?? 0;
+          final profit = widget.includeCommissionSwap 
+              ? rawProfit + swap + commission 
               : rawProfit;
           final isBuy = type.toLowerCase() == 'buy';
-
+          
           // Get account balance for P/L %
           final posTerminalIndex = currentPos['terminalIndex'] as int? ?? -1;
           final account = widget.accounts.firstWhere(
@@ -645,7 +609,6 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
 
           // Calculate total P/L across all matching positions
           double totalProfit = 0;
-          double totalBalance = 0;
           for (final pos in matchingPositions) {
             final posRawProfit = (pos['profit'] as num?)?.toDouble() ?? 0;
             final posSwap = (pos['swap'] as num?)?.toDouble() ?? 0;
@@ -655,21 +618,11 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
             } else {
               totalProfit += posRawProfit;
             }
-            // Get balance for this position's account
-            final posTotalTerminalIndex = pos['terminalIndex'] as int? ?? -1;
-            final posAccount = widget.accounts.firstWhere(
-              (a) => a['index'] == posTotalTerminalIndex,
-              orElse: () => <String, dynamic>{},
-            );
-            totalBalance += (posAccount['balance'] as num?)?.toDouble() ?? 0;
           }
-          final totalPlPercent = totalBalance > 0
-              ? (totalProfit / totalBalance) * 100
-              : 0.0;
 
           // Use known terminals for display to avoid flickering, sorted by index for consistent order
-          final displayTerminalsSet = _knownTerminalIndices.isNotEmpty
-              ? _knownTerminalIndices
+          final displayTerminalsSet = _knownTerminalIndices.isNotEmpty 
+              ? _knownTerminalIndices 
               : matchingPositions.map((p) => p['terminalIndex'] as int).toSet();
           final displayTerminals = displayTerminalsSet.toList()..sort();
 
@@ -692,8 +645,8 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
                     ),
                     borderRadius: BorderRadius.circular(16),
                     border: Border.all(
-                      color: isBuy
-                          ? AppColors.primary.withOpacity(0.3)
+                      color: isBuy 
+                          ? AppColors.primary.withOpacity(0.3) 
                           : AppColors.error.withOpacity(0.3),
                     ),
                   ),
@@ -711,14 +664,9 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
                           ),
                           const SizedBox(width: 12),
                           Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 6,
-                            ),
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                             decoration: BoxDecoration(
-                              color: isBuy
-                                  ? AppColors.primary
-                                  : AppColors.error,
+                              color: isBuy ? AppColors.primary : AppColors.error,
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: Text(
@@ -744,19 +692,10 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Text(
-                                  'Open Price',
-                                  style: TextStyle(
-                                    color: AppColors.textSecondary,
-                                    fontSize: 12,
-                                  ),
-                                ),
+                                const Text('Open Price', style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
                                 Text(
                                   _formatPrice(openPrice),
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 16,
-                                  ),
+                                  style: const TextStyle(color: Colors.white, fontSize: 16),
                                 ),
                               ],
                             ),
@@ -765,23 +704,13 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.center,
                               children: [
-                                const Text(
-                                  'Current Price',
-                                  style: TextStyle(
-                                    color: AppColors.textSecondary,
-                                    fontSize: 12,
-                                  ),
-                                ),
+                                const Text('Current Price', style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
                                 Text(
                                   _formatPrice(currentPrice),
                                   style: TextStyle(
-                                    color: isBuy
-                                        ? (currentPrice >= openPrice
-                                              ? AppColors.primary
-                                              : AppColors.error)
-                                        : (currentPrice <= openPrice
-                                              ? AppColors.primary
-                                              : AppColors.error),
+                                    color: isBuy 
+                                        ? (currentPrice >= openPrice ? AppColors.primary : AppColors.error)
+                                        : (currentPrice <= openPrice ? AppColors.primary : AppColors.error),
                                     fontSize: 16,
                                     fontWeight: FontWeight.w600,
                                   ),
@@ -797,25 +726,17 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
                                   mainAxisAlignment: MainAxisAlignment.end,
                                   children: [
                                     Text(
-                                      widget.includeCommissionSwap
-                                          ? 'Net P/L'
-                                          : 'P/L',
-                                      style: const TextStyle(
-                                        color: AppColors.textSecondary,
-                                        fontSize: 12,
-                                      ),
+                                      widget.includeCommissionSwap ? 'Net P/L' : 'P/L',
+                                      style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
                                     ),
-                                    if (widget.showPLPercent &&
-                                        balance > 0) ...[
+                                    if (widget.showPLPercent && balance > 0) ...[
                                       const SizedBox(width: 8),
                                       Text(
                                         '${plPercent.toStringAsFixed(2)}%',
                                         style: TextStyle(
-                                          color: profit == 0
-                                              ? Colors.white
-                                              : (profit > 0
-                                                    ? AppColors.primary
-                                                    : AppColors.error),
+                                          color: profit == 0 
+                                              ? Colors.white 
+                                              : (profit > 0 ? AppColors.primary : AppColors.error),
                                           fontSize: 12,
                                         ),
                                       ),
@@ -825,9 +746,7 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
                                 Text(
                                   Formatters.formatCurrencyWithSign(profit),
                                   style: TextStyle(
-                                    color: profit >= 0
-                                        ? AppColors.primary
-                                        : AppColors.error,
+                                    color: profit >= 0 ? AppColors.primary : AppColors.error,
                                     fontSize: 16,
                                     fontWeight: FontWeight.bold,
                                   ),
@@ -837,7 +756,7 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
                           ),
                         ],
                       ),
-
+                      
                       // Always show commission/swap details
                       const SizedBox(height: 12),
                       Row(
@@ -846,21 +765,11 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
                           if (widget.includeCommissionSwap)
                             Column(
                               children: [
-                                const Text(
-                                  'Raw P/L',
-                                  style: TextStyle(
-                                    color: AppColors.textSecondary,
-                                    fontSize: 11,
-                                  ),
-                                ),
+                                const Text('Raw P/L', style: TextStyle(color: AppColors.textSecondary, fontSize: 11)),
                                 Text(
                                   Formatters.formatCurrencyWithSign(rawProfit),
                                   style: TextStyle(
-                                    color: rawProfit == 0
-                                        ? Colors.white
-                                        : (rawProfit > 0
-                                              ? AppColors.primary
-                                              : AppColors.error),
+                                    color: rawProfit == 0 ? Colors.white : (rawProfit > 0 ? AppColors.primary : AppColors.error),
                                     fontSize: 13,
                                   ),
                                 ),
@@ -868,21 +777,11 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
                             ),
                           Column(
                             children: [
-                              const Text(
-                                'Swap',
-                                style: TextStyle(
-                                  color: AppColors.textSecondary,
-                                  fontSize: 11,
-                                ),
-                              ),
+                              const Text('Swap', style: TextStyle(color: AppColors.textSecondary, fontSize: 11)),
                               Text(
                                 Formatters.formatCurrency(swap),
                                 style: TextStyle(
-                                  color: swap == 0
-                                      ? Colors.white
-                                      : (swap > 0
-                                            ? AppColors.primary
-                                            : AppColors.error),
+                                  color: swap == 0 ? Colors.white : (swap > 0 ? AppColors.primary : AppColors.error),
                                   fontSize: 13,
                                 ),
                               ),
@@ -890,21 +789,11 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
                           ),
                           Column(
                             children: [
-                              const Text(
-                                'Commission',
-                                style: TextStyle(
-                                  color: AppColors.textSecondary,
-                                  fontSize: 11,
-                                ),
-                              ),
+                              const Text('Commission', style: TextStyle(color: AppColors.textSecondary, fontSize: 11)),
                               Text(
                                 Formatters.formatCurrency(commission),
                                 style: TextStyle(
-                                  color: commission == 0
-                                      ? Colors.white
-                                      : (commission > 0
-                                            ? AppColors.primary
-                                            : AppColors.error),
+                                  color: commission == 0 ? Colors.white : (commission > 0 ? AppColors.primary : AppColors.error),
                                   fontSize: 13,
                                 ),
                               ),
@@ -912,15 +801,12 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
                           ),
                         ],
                       ),
-
+                      
                       // Total P/L if multiple positions
                       if (displayTerminals.length > 1) ...[
                         const SizedBox(height: 16),
                         Container(
-                          padding: const EdgeInsets.symmetric(
-                            vertical: 10,
-                            horizontal: 14,
-                          ),
+                          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
                           decoration: BoxDecoration(
                             color: totalProfit >= 0
                                 ? AppColors.primary.withOpacity(0.1)
@@ -931,20 +817,15 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
                               Text(
-                                widget.includeCommissionSwap
+                                widget.includeCommissionSwap 
                                     ? 'Total Net P/L (${displayTerminals.length} positions)'
                                     : 'Total P/L (${displayTerminals.length} positions)',
-                                style: const TextStyle(
-                                  color: AppColors.textSecondary,
-                                  fontSize: 12,
-                                ),
+                                style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
                               ),
                               Text(
                                 Formatters.formatCurrencyWithSign(totalProfit),
                                 style: TextStyle(
-                                  color: totalProfit >= 0
-                                      ? AppColors.primary
-                                      : AppColors.error,
+                                  color: totalProfit >= 0 ? AppColors.primary : AppColors.error,
                                   fontSize: 16,
                                   fontWeight: FontWeight.bold,
                                 ),
@@ -965,7 +846,7 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
                   style: AppTextStyles.label,
                 ),
                 const SizedBox(height: 12),
-
+                
                 if (displayTerminals.length <= 1)
                   Container(
                     padding: const EdgeInsets.all(12),
@@ -975,19 +856,12 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
                     ),
                     child: Row(
                       children: [
-                        const Icon(
-                          Icons.info_outline,
-                          color: AppColors.textSecondary,
-                          size: 18,
-                        ),
+                        const Icon(Icons.info_outline, color: AppColors.textSecondary, size: 18),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
                             'Position only exists on ${_getAccountDisplay(widget.position['terminalIndex'] as int)}',
-                            style: const TextStyle(
-                              color: AppColors.textSecondary,
-                              fontSize: 13,
-                            ),
+                            style: const TextStyle(color: AppColors.textSecondary, fontSize: 13),
                           ),
                         ),
                       ],
@@ -999,14 +873,9 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
                     runSpacing: 8,
                     children: displayTerminals.map((terminalIndex) {
                       final accountNum = _getAccountDisplay(terminalIndex);
-                      final pos = matchingPositions
-                          .where((p) => p['terminalIndex'] == terminalIndex)
-                          .firstOrNull;
-                      final posProfit =
-                          (pos?['profit'] as num?)?.toDouble() ?? 0;
-                      final isSelected = _selectedTerminalIndices.contains(
-                        terminalIndex,
-                      );
+                      final pos = matchingPositions.where((p) => p['terminalIndex'] == terminalIndex).firstOrNull;
+                      final posProfit = (pos?['profit'] as num?)?.toDouble() ?? 0;
+                      final isSelected = _selectedTerminalIndices.contains(terminalIndex);
 
                       return GestureDetector(
                         onTap: () {
@@ -1019,19 +888,14 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
                           });
                         },
                         child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 10,
-                          ),
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                           decoration: BoxDecoration(
-                            color: isSelected
-                                ? AppColors.primaryWithOpacity(0.2)
+                            color: isSelected 
+                                ? AppColors.primaryWithOpacity(0.2) 
                                 : AppColors.surface,
                             borderRadius: BorderRadius.circular(10),
                             border: Border.all(
-                              color: isSelected
-                                  ? AppColors.primary
-                                  : AppColors.border,
+                              color: isSelected ? AppColors.primary : AppColors.border,
                               width: isSelected ? 2 : 1,
                             ),
                           ),
@@ -1039,12 +903,8 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               Icon(
-                                isSelected
-                                    ? Icons.check_circle
-                                    : Icons.circle_outlined,
-                                color: isSelected
-                                    ? AppColors.primary
-                                    : AppColors.textSecondary,
+                                isSelected ? Icons.check_circle : Icons.circle_outlined,
+                                color: isSelected ? AppColors.primary : AppColors.textSecondary,
                                 size: 18,
                               ),
                               const SizedBox(width: 8),
@@ -1054,21 +914,15 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
                                   Text(
                                     accountNum,
                                     style: TextStyle(
-                                      color: isSelected
-                                          ? Colors.white
-                                          : AppColors.textSecondary,
+                                      color: isSelected ? Colors.white : AppColors.textSecondary,
                                       fontSize: 13,
                                       fontWeight: FontWeight.w600,
                                     ),
                                   ),
                                   Text(
-                                    Formatters.formatCurrencyWithSign(
-                                      posProfit,
-                                    ),
+                                    Formatters.formatCurrencyWithSign(posProfit),
                                     style: TextStyle(
-                                      color: posProfit >= 0
-                                          ? AppColors.primary
-                                          : AppColors.error,
+                                      color: posProfit >= 0 ? AppColors.primary : AppColors.error,
                                       fontSize: 11,
                                     ),
                                   ),
@@ -1086,42 +940,29 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
                 // Modify section
                 const Text('MODIFY POSITION', style: AppTextStyles.label),
                 const SizedBox(height: 12),
-
+                
                 Row(
                   children: [
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
-                            'Stop Loss',
-                            style: TextStyle(
-                              color: AppColors.textSecondary,
-                              fontSize: 12,
-                            ),
-                          ),
+                          const Text('Stop Loss', style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
                           const SizedBox(height: 6),
                           TextField(
                             controller: _slController,
-                            keyboardType: const TextInputType.numberWithOptions(
-                              decimal: true,
-                            ),
+                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
                             style: const TextStyle(color: Colors.white),
                             decoration: InputDecoration(
                               hintText: _formatPrice(0),
-                              hintStyle: TextStyle(
-                                color: AppColors.textSecondary.withOpacity(0.5),
-                              ),
+                              hintStyle: TextStyle(color: AppColors.textSecondary.withOpacity(0.5)),
                               filled: true,
                               fillColor: AppColors.surface,
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(10),
                                 borderSide: BorderSide.none,
                               ),
-                              contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 14,
-                                vertical: 14,
-                              ),
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
                             ),
                           ),
                         ],
@@ -1132,35 +973,22 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
-                            'Take Profit',
-                            style: TextStyle(
-                              color: AppColors.textSecondary,
-                              fontSize: 12,
-                            ),
-                          ),
+                          const Text('Take Profit', style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
                           const SizedBox(height: 6),
                           TextField(
                             controller: _tpController,
-                            keyboardType: const TextInputType.numberWithOptions(
-                              decimal: true,
-                            ),
+                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
                             style: const TextStyle(color: Colors.white),
                             decoration: InputDecoration(
                               hintText: _formatPrice(0),
-                              hintStyle: TextStyle(
-                                color: AppColors.textSecondary.withOpacity(0.5),
-                              ),
+                              hintStyle: TextStyle(color: AppColors.textSecondary.withOpacity(0.5)),
                               filled: true,
                               fillColor: AppColors.surface,
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(10),
                                 borderSide: BorderSide.none,
                               ),
-                              contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 14,
-                                vertical: 14,
-                              ),
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
                             ),
                           ),
                         ],
@@ -1199,13 +1027,9 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
                   width: double.infinity,
                   height: 56,
                   child: ElevatedButton(
-                    onPressed: (_isProcessing || _hasModifications)
-                        ? null
-                        : _closePositions,
+                    onPressed: (_isProcessing || _hasModifications) ? null : _closePositions,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: _hasModifications
-                          ? AppColors.error.withOpacity(0.3)
-                          : AppColors.error,
+                      backgroundColor: _hasModifications ? AppColors.error.withOpacity(0.3) : AppColors.error,
                       disabledBackgroundColor: AppColors.error.withOpacity(0.3),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
@@ -1216,9 +1040,7 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
                         : Text(
                             'CLOSE ${_selectedTerminalIndices.length} ${_getPositionTypeLabel()}',
                             style: TextStyle(
-                              color: _hasModifications
-                                  ? Colors.white.withOpacity(0.5)
-                                  : Colors.white,
+                              color: _hasModifications ? Colors.white.withOpacity(0.5) : Colors.white,
                               fontSize: 16,
                               fontWeight: FontWeight.bold,
                             ),

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../core/theme.dart';
+import '../../core/theme.dart';
 
 class SymbolSuffixesScreen extends StatefulWidget {
   final List<Map<String, dynamic>> accounts;
@@ -30,7 +30,7 @@ class _SymbolSuffixesScreenState extends State<SymbolSuffixesScreen> {
     super.initState();
     _suffixes = Map.from(widget.symbolSuffixes);
     _controllers = {};
-    
+
     for (final account in widget.accounts) {
       final accountNum = account['account'] as String? ?? '';
       final suffix = _suffixes[accountNum] ?? '';
@@ -82,7 +82,7 @@ class _SymbolSuffixesScreenState extends State<SymbolSuffixesScreen> {
 
   Widget _buildExampleCard() {
     final examples = <String>[];
-    
+
     for (final account in widget.accounts) {
       final accountNum = account['account'] as String? ?? '';
       final suffix = _controllers[accountNum]?.text ?? '';
@@ -93,9 +93,9 @@ class _SymbolSuffixesScreenState extends State<SymbolSuffixesScreen> {
         examples.add('$name: XAUUSD → XAUUSD (no suffix)');
       }
     }
-    
+
     if (examples.isEmpty) return const SizedBox.shrink();
-    
+
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -121,16 +121,18 @@ class _SymbolSuffixesScreenState extends State<SymbolSuffixesScreen> {
             ],
           ),
           const SizedBox(height: 10),
-          ...examples.map((ex) => Padding(
-            padding: const EdgeInsets.only(bottom: 4),
-            child: Text(
-              '• $ex',
-              style: const TextStyle(
-                color: AppColors.textSecondary,
-                fontSize: 12,
+          ...examples.map(
+            (ex) => Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Text(
+                '• $ex',
+                style: const TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: 12,
+                ),
               ),
             ),
-          )),
+          ),
         ],
       ),
     );
@@ -142,9 +144,12 @@ class _SymbolSuffixesScreenState extends State<SymbolSuffixesScreen> {
       backgroundColor: AppColors.background,
       appBar: AppBar(
         backgroundColor: AppColors.background,
-        title: const Text('Symbol Suffixes', style: TextStyle(color: Colors.white)),
+        title: const Text(
+          'Symbol Suffixes',
+          style: TextStyle(color: Colors.white),
+        ),
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          icon: const Icon(Icons.chevron_left, color: Colors.white),
           onPressed: () => Navigator.pop(context),
         ),
         actions: [
@@ -162,10 +167,7 @@ class _SymbolSuffixesScreenState extends State<SymbolSuffixesScreen> {
       ),
       body: widget.accounts.isEmpty
           ? const Center(
-              child: Text(
-                'No accounts connected',
-                style: AppTextStyles.body,
-              ),
+              child: Text('No accounts connected', style: AppTextStyles.body),
             )
           : SingleChildScrollView(
               padding: const EdgeInsets.all(16),
@@ -176,25 +178,26 @@ class _SymbolSuffixesScreenState extends State<SymbolSuffixesScreen> {
                   Container(
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
-                      color: AppColors.surface,
+                      color: Colors.orange.withOpacity(0.1),
                       borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: AppColors.border),
+                      border: Border.all(color: Colors.orange.withOpacity(0.3)),
                     ),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Icon(Icons.info_outline, 
-                          color: AppColors.textSecondary.withOpacity(0.7), 
+                        Icon(
+                          Icons.info_outline,
+                          color: Colors.orange,
                           size: 18,
                         ),
                         const SizedBox(width: 10),
-                        const Expanded(
+                        Expanded(
                           child: Text(
                             'Set symbol suffixes for each account. For example, if your broker uses '
                             '"XAUUSD-VIP" or "EURUSD.std", enter the suffix here. '
                             'When placing orders, the suffix will be automatically appended.',
                             style: TextStyle(
-                              color: AppColors.textSecondary,
+                              color: Colors.orange.shade200,
                               fontSize: 12,
                               height: 1.4,
                             ),
@@ -203,25 +206,22 @@ class _SymbolSuffixesScreenState extends State<SymbolSuffixesScreen> {
                       ],
                     ),
                   ),
-                  
+
                   const SizedBox(height: 24),
-                  
+
                   // Example
                   _buildExampleCard(),
-                  
+
                   const SizedBox(height: 24),
-                  
+
                   // Suffix inputs
-                  const Text(
-                    'ACCOUNT SUFFIXES',
-                    style: AppTextStyles.label,
-                  ),
+                  const Text('ACCOUNT SUFFIXES', style: AppTextStyles.label),
                   const SizedBox(height: 12),
-                  
+
                   ...widget.accounts.map((account) {
                     final accountNum = account['account'] as String? ?? '';
                     final broker = account['broker'] as String? ?? '';
-                    
+
                     return Container(
                       margin: const EdgeInsets.only(bottom: 16),
                       padding: const EdgeInsets.all(16),
@@ -263,7 +263,10 @@ class _SymbolSuffixesScreenState extends State<SymbolSuffixesScreen> {
                                         fontWeight: FontWeight.w600,
                                       ),
                                     ),
-                                    if (widget.accountNames[accountNum]?.isNotEmpty == true)
+                                    if (widget
+                                            .accountNames[accountNum]
+                                            ?.isNotEmpty ==
+                                        true)
                                       Text(
                                         accountNum,
                                         style: const TextStyle(
@@ -287,7 +290,10 @@ class _SymbolSuffixesScreenState extends State<SymbolSuffixesScreen> {
                           const SizedBox(height: 16),
                           TextField(
                             controller: _controllers[accountNum],
-                            style: const TextStyle(color: Colors.white, fontSize: 14),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 14,
+                            ),
                             onChanged: (_) => setState(() {}),
                             decoration: InputDecoration(
                               labelText: 'Symbol Suffix',
@@ -304,17 +310,26 @@ class _SymbolSuffixesScreenState extends State<SymbolSuffixesScreen> {
                               fillColor: AppColors.background,
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(10),
-                                borderSide: const BorderSide(color: AppColors.border),
+                                borderSide: const BorderSide(
+                                  color: AppColors.border,
+                                ),
                               ),
                               enabledBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(10),
-                                borderSide: const BorderSide(color: AppColors.border),
+                                borderSide: const BorderSide(
+                                  color: AppColors.border,
+                                ),
                               ),
                               focusedBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(10),
-                                borderSide: const BorderSide(color: AppColors.primary),
+                                borderSide: const BorderSide(
+                                  color: AppColors.primary,
+                                ),
                               ),
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 14,
+                                vertical: 14,
+                              ),
                             ),
                           ),
                         ],

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../core/theme.dart';
+import '../../core/theme.dart';
 
 class AccountNamesScreen extends StatefulWidget {
   final List<Map<String, dynamic>> accounts;

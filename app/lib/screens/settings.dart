@@ -1,16 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/theme.dart';
-import 'account_names_screen.dart';
-import 'lot_sizing_screen.dart';
-import 'symbol_suffixes_screen.dart';
+import 'settings/account_names.dart';
+import 'settings/lot_sizing.dart';
+import 'settings/symbol_suffixes.dart';
+import 'settings/preferred_symbols.dart';
 
-class AccountSettingsScreen extends StatefulWidget {
+class SettingsScreen extends StatefulWidget {
   final List<Map<String, dynamic>> accounts;
   final Map<String, String> accountNames;
   final String? mainAccountNum;
   final Map<String, double> lotRatios;
   final Map<String, String> symbolSuffixes;
+  final Set<String> preferredPairs;
   final bool includeCommissionSwap;
   final bool showPLPercent;
   final bool confirmBeforeClose;
@@ -18,17 +20,19 @@ class AccountSettingsScreen extends StatefulWidget {
   final Function(String?) onMainAccountUpdated;
   final Function(Map<String, double>) onLotRatiosUpdated;
   final Function(Map<String, String>) onSymbolSuffixesUpdated;
+  final Function(Set<String>) onPreferredPairsUpdated;
   final Function(bool) onIncludeCommissionSwapUpdated;
   final Function(bool) onShowPLPercentUpdated;
   final Function(bool) onConfirmBeforeCloseUpdated;
 
-  const AccountSettingsScreen({
+  const SettingsScreen({
     super.key,
     required this.accounts,
     required this.accountNames,
     required this.mainAccountNum,
     required this.lotRatios,
     required this.symbolSuffixes,
+    required this.preferredPairs,
     required this.includeCommissionSwap,
     required this.showPLPercent,
     required this.confirmBeforeClose,
@@ -36,20 +40,22 @@ class AccountSettingsScreen extends StatefulWidget {
     required this.onMainAccountUpdated,
     required this.onLotRatiosUpdated,
     required this.onSymbolSuffixesUpdated,
+    required this.onPreferredPairsUpdated,
     required this.onIncludeCommissionSwapUpdated,
     required this.onShowPLPercentUpdated,
     required this.onConfirmBeforeCloseUpdated,
   });
 
   @override
-  State<AccountSettingsScreen> createState() => _AccountSettingsScreenState();
+  State<SettingsScreen> createState() => _SettingsScreenState();
 }
 
-class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
+class _SettingsScreenState extends State<SettingsScreen> {
   late Map<String, String> _accountNames;
   late String? _mainAccountNum;
   late Map<String, double> _lotRatios;
   late Map<String, String> _symbolSuffixes;
+  late Set<String> _preferredPairs;
   late bool _includeCommissionSwap;
   late bool _showPLPercent;
   late bool _confirmBeforeClose;
@@ -61,6 +67,7 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
     _mainAccountNum = widget.mainAccountNum;
     _lotRatios = Map.from(widget.lotRatios);
     _symbolSuffixes = Map.from(widget.symbolSuffixes);
+    _preferredPairs = Set.from(widget.preferredPairs);
     _includeCommissionSwap = widget.includeCommissionSwap;
     _showPLPercent = widget.showPLPercent;
     _confirmBeforeClose = widget.confirmBeforeClose;
@@ -70,11 +77,11 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
     setState(() {
       _includeCommissionSwap = value;
     });
-
+    
     // Save to prefs
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('include_commission_swap', value);
-
+    
     // Notify parent
     widget.onIncludeCommissionSwapUpdated(value);
   }
@@ -83,11 +90,11 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
     setState(() {
       _confirmBeforeClose = value;
     });
-
+    
     // Save to prefs
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('confirm_before_close', value);
-
+    
     // Notify parent
     widget.onConfirmBeforeCloseUpdated(value);
   }
@@ -96,11 +103,11 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
     setState(() {
       _showPLPercent = value;
     });
-
+    
     // Save to prefs
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('show_pl_percent', value);
-
+    
     // Notify parent
     widget.onShowPLPercentUpdated(value);
   }
@@ -168,6 +175,23 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
     );
   }
 
+  void _openPreferredPairs() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => PreferredSymbolsScreen(
+          selectedPairs: _preferredPairs,
+          onPairsUpdated: (pairs) {
+            setState(() {
+              _preferredPairs = pairs;
+            });
+            widget.onPreferredPairsUpdated(pairs);
+          },
+        ),
+      ),
+    );
+  }
+
   String _getMainAccountDisplay() {
     if (_mainAccountNum == null) return 'Not set';
     final customName = _accountNames[_mainAccountNum];
@@ -185,6 +209,10 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
     return _symbolSuffixes.values.where((suffix) => suffix.isNotEmpty).length;
   }
 
+  int _getPreferredPairsCount() {
+    return _preferredPairs.length;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -198,31 +226,42 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
         ),
       ),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
         children: [
           // Account Names Card
           _buildNavigationCard(
             icon: Icons.badge_outlined,
             title: 'Account Names',
-            subtitle:
-                '${_getNamedAccountsCount()} of ${widget.accounts.length} accounts named',
+            subtitle: '${_getNamedAccountsCount()} of ${widget.accounts.length} accounts named',
             onTap: _openAccountNames,
           ),
-
+          
           const SizedBox(height: 12),
-
+          
           // Lot Sizing Card
           _buildNavigationCard(
             icon: Icons.scale_outlined,
             title: 'Lot Sizing',
-            subtitle: _mainAccountNum != null
+            subtitle: _mainAccountNum != null 
                 ? 'Main: ${_getMainAccountDisplay()}'
                 : 'Configure proportional lot sizes',
             onTap: _openLotSizing,
           ),
-
+          
           const SizedBox(height: 12),
-
+          
+          // Preferred Symbols Card
+          _buildNavigationCard(
+            icon: Icons.currency_exchange_outlined,
+            title: 'Preferred Symbols',
+            subtitle: _getPreferredPairsCount() > 0
+                ? '${_getPreferredPairsCount()} symbol${_getPreferredPairsCount() == 1 ? '' : 's'} selected'
+                : 'Choose symbols for new orders',
+            onTap: _openPreferredPairs,
+          ),
+          
+          const SizedBox(height: 12),
+          
           // Symbol Suffixes Card
           _buildNavigationCard(
             icon: Icons.text_fields_outlined,
@@ -232,9 +271,9 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
                 : 'Add broker-specific symbol suffixes',
             onTap: _openSymbolSuffixes,
           ),
-
-          const SizedBox(height: 24),
-
+          
+          const SizedBox(height: 12),
+          
           // Include Commission & Swap Checkbox
           GestureDetector(
             onTap: () => _toggleCommissionSwap(!_includeCommissionSwap),
@@ -275,7 +314,7 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          _includeCommissionSwap
+                          _includeCommissionSwap 
                               ? 'P/L includes commission and swap fees'
                               : 'P/L shows raw profit only',
                           style: const TextStyle(
@@ -296,9 +335,9 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
               ),
             ),
           ),
-
+          
           const SizedBox(height: 12),
-
+          
           // Show P/L % Checkbox
           GestureDetector(
             onTap: () => _toggleShowPLPercent(!_showPLPercent),
@@ -339,7 +378,7 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          _showPLPercent
+                          _showPLPercent 
                               ? 'Display P/L as percentage of balance'
                               : 'P/L percentage hidden',
                           style: const TextStyle(
@@ -360,9 +399,9 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
               ),
             ),
           ),
-
+          
           const SizedBox(height: 12),
-
+          
           // Confirm Before Close Checkbox
           GestureDetector(
             onTap: () => _toggleConfirmBeforeClose(!_confirmBeforeClose),
@@ -403,7 +442,7 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          _confirmBeforeClose
+                          _confirmBeforeClose 
                               ? 'Show confirmation dialog before closing positions'
                               : 'Close positions without confirmation',
                           style: const TextStyle(
@@ -453,7 +492,11 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
                 color: AppColors.primaryWithOpacity(0.15),
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: Icon(icon, color: AppColors.primary, size: 24),
+              child: Icon(
+                icon,
+                color: AppColors.primary,
+                size: 24,
+              ),
             ),
             const SizedBox(width: 16),
             Expanded(

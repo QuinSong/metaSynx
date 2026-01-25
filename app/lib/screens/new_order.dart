@@ -6,6 +6,7 @@ class NewOrderScreen extends StatefulWidget {
   final Map<String, String> accountNames;
   final String? mainAccountNum;
   final Map<String, double> lotRatios;
+  final Set<String> preferredPairs;
   final void Function({
     required String symbol,
     required String type,
@@ -22,6 +23,7 @@ class NewOrderScreen extends StatefulWidget {
     required this.accountNames,
     required this.mainAccountNum,
     required this.lotRatios,
+    required this.preferredPairs,
     required this.onPlaceOrder,
   });
 
@@ -39,10 +41,18 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
   late Set<int> _selectedAccountIndices;
   bool _isPlacing = false;
 
-  final List<String> _commonPairs = [
+  // Default pairs if none selected in settings
+  static const List<String> _defaultPairs = [
     'EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF', 'AUDUSD',
     'USDCAD', 'NZDUSD', 'XAUUSD', 'XAGUSD', 'BTCUSD',
   ];
+
+  List<String> get _displayPairs {
+    if (widget.preferredPairs.isNotEmpty) {
+      return widget.preferredPairs.toList()..sort();
+    }
+    return _defaultPairs;
+  }
 
   @override
   void initState() {
@@ -76,15 +86,6 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
   bool get _useRatios {
     // Use ratios only if main account is selected
     return _isMainAccountSelected;
-  }
-
-  int? _getMainAccountIndex() {
-    if (widget.mainAccountNum == null) return null;
-    final account = widget.accounts.firstWhere(
-      (a) => a['account'] == widget.mainAccountNum,
-      orElse: () => <String, dynamic>{},
-    );
-    return account['index'] as int?;
   }
 
   void _toggleAccountSelection(int index) {
@@ -308,7 +309,7 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
     return Wrap(
       spacing: 8,
       runSpacing: 8,
-      children: _commonPairs.map((pair) {
+      children: _displayPairs.map((pair) {
         final isSelected = _symbolController.text.toUpperCase() == pair;
         return GestureDetector(
           onTap: () {
