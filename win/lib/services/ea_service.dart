@@ -10,6 +10,7 @@ class EAService {
   Timer? _pollTimer;
   Timer? _chartWatchTimer;
   String? _lastChartContent;
+  DateTime? _lastChartModified;
   
   Function(List<Map<String, dynamic>>)? onAccountsUpdated;
   Function(Map<String, dynamic>)? onChartDataReceived;
@@ -209,6 +210,7 @@ class EAService {
     onLog?.call('Subscribing to chart: $symbol $timeframe on terminal $terminalIndex');
     
     _lastChartContent = null;
+    _lastChartModified = null;
     
     // Send subscribe command to EA - this will write history data
     await sendCommandToTerminal(terminalIndex, {
@@ -280,6 +282,7 @@ class EAService {
   void _startChartFileWatcher(int terminalIndex) {
     _stopChartFileWatcher();
     _lastChartContent = null;
+    _lastChartModified = null;
     
     // Poll chart file every 200ms for updates
     _chartWatchTimer = Timer.periodic(const Duration(milliseconds: 200), (_) {
@@ -292,6 +295,7 @@ class EAService {
     _chartWatchTimer?.cancel();
     _chartWatchTimer = null;
     _lastChartContent = null;
+    _lastChartModified = null;
   }
 
   /// Check chart file for updates and forward to callback
@@ -304,12 +308,20 @@ class EAService {
     if (!await file.exists()) return;
     
     try {
+      // Check if file was modified since last read
+      final stat = await file.stat();
+      if (_lastChartModified != null && !stat.modified.isAfter(_lastChartModified!)) {
+        return; // File hasn't been modified
+      }
+      _lastChartModified = stat.modified;
+      
       final content = await file.readAsString();
+      if (content.isEmpty) return;
       
-      // Skip if content hasn't changed or is empty
-      if (content == _lastChartContent || content.isEmpty) return;
-      
+      // Skip if content is exactly the same (no price change)
+      if (content == _lastChartContent) return;
       _lastChartContent = content;
+      
       final data = jsonDecode(content) as Map<String, dynamic>;
       
       // Log update received
