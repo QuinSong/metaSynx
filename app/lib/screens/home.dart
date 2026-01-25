@@ -298,6 +298,13 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
+  void _requestChartData(int terminalIndex) {
+    _connection.send({
+      'action': 'get_chart_data',
+      'terminalIndex': terminalIndex,
+    });
+  }
+
   void _openAccountDetail(Map<String, dynamic> account) {
     Navigator.push(
       context,
@@ -560,6 +567,7 @@ class _HomeScreenState extends State<HomeScreen> {
           chartDataNotifier: _chartDataNotifier,
           onSubscribeChart: _subscribeChart,
           onUnsubscribeChart: _unsubscribeChart,
+          onRequestChartData: _requestChartData,
         ),
       ),
     );

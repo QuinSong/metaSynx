@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../core/theme.dart';
@@ -20,6 +21,7 @@ class ChartScreen extends StatefulWidget {
   final ValueNotifier<Map<String, dynamic>?>? chartDataNotifier;
   final void Function(String symbol, String timeframe, int terminalIndex)? onSubscribeChart;
   final void Function(int terminalIndex)? onUnsubscribeChart;
+  final void Function(int terminalIndex)? onRequestChartData;
 
   const ChartScreen({
     super.key,
@@ -38,6 +40,7 @@ class ChartScreen extends StatefulWidget {
     this.chartDataNotifier,
     this.onSubscribeChart,
     this.onUnsubscribeChart,
+    this.onRequestChartData,
   });
 
   @override
@@ -52,6 +55,7 @@ class _ChartScreenState extends State<ChartScreen> {
   bool _hasReceivedData = false;
   int? _selectedAccountIndex;
   final TextEditingController _symbolController = TextEditingController();
+  Timer? _chartPollTimer;
 
   final List<Map<String, String>> _timeframes = [
     {'label': '1m', 'value': '1'},
@@ -67,7 +71,8 @@ class _ChartScreenState extends State<ChartScreen> {
   bool get _useMT4Data => 
       widget.chartDataNotifier != null && 
       widget.onSubscribeChart != null && 
-      widget.onUnsubscribeChart != null;
+      widget.onUnsubscribeChart != null &&
+      widget.onRequestChartData != null;
 
   @override
   void initState() {
@@ -132,6 +137,9 @@ class _ChartScreenState extends State<ChartScreen> {
       _hasReceivedData = false;
       widget.onSubscribeChart!(_currentSymbol, _currentInterval, _selectedAccountIndex!);
       
+      // Start polling for chart data updates every 500ms
+      _startChartPolling();
+      
       // Set a timeout - if no data after 5 seconds, show error
       Future.delayed(const Duration(seconds: 5), () {
         if (mounted && !_hasReceivedData && _isLoading) {
@@ -151,6 +159,20 @@ class _ChartScreenState extends State<ChartScreen> {
         document.getElementById('loading').style.color = '#FFA726';
       ''');
     }
+  }
+
+  void _startChartPolling() {
+    _stopChartPolling();
+    _chartPollTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
+      if (_selectedAccountIndex != null) {
+        widget.onRequestChartData!(_selectedAccountIndex!);
+      }
+    });
+  }
+
+  void _stopChartPolling() {
+    _chartPollTimer?.cancel();
+    _chartPollTimer = null;
   }
 
   void _onChartDataReceived() {
@@ -544,6 +566,9 @@ class _ChartScreenState extends State<ChartScreen> {
   }
 
   void _loadChart() {
+    // Stop current polling
+    _stopChartPolling();
+    
     // Unsubscribe from current chart data
     if (_useMT4Data && _selectedAccountIndex != null) {
       widget.onUnsubscribeChart!(_selectedAccountIndex!);
@@ -578,6 +603,9 @@ class _ChartScreenState extends State<ChartScreen> {
 
   @override
   void dispose() {
+    // Stop polling
+    _stopChartPolling();
+    
     // Unsubscribe from chart data when leaving screen
     if (_useMT4Data && _selectedAccountIndex != null) {
       widget.onUnsubscribeChart!(_selectedAccountIndex!);

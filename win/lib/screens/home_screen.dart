@@ -39,13 +39,6 @@ class _HomeScreenState extends State<HomeScreen> {
     _eaService.onAccountsUpdated = (accounts) {
       setState(() => _accounts = accounts);
     };
-    _eaService.onChartDataReceived = (data) {
-      // Forward chart data to mobile app
-      _connection?.send({
-        'action': 'chart_data',
-        ...data,
-      });
-    };
     await _eaService.initialize();
     _eaService.startPolling();
 
@@ -137,6 +130,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
       case 'unsubscribe_chart':
         _handleUnsubscribeChart(message);
+        break;
+
+      case 'get_chart_data':
+        _handleGetChartData(message);
         break;
 
       default:
@@ -240,6 +237,17 @@ class _HomeScreenState extends State<HomeScreen> {
     final terminalIndex = message['terminalIndex'] as int? ?? 0;
     _addLog('Chart unsubscribe on terminal $terminalIndex');
     await _eaService.unsubscribeChart(terminalIndex);
+  }
+
+  Future<void> _handleGetChartData(Map<String, dynamic> message) async {
+    final terminalIndex = message['terminalIndex'] as int? ?? 0;
+    final data = await _eaService.getChartData(terminalIndex);
+    if (data != null) {
+      _connection?.send({
+        'action': 'chart_data',
+        ...data,
+      });
+    }
   }
 
   void _regenerateRoom() async {

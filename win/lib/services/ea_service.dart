@@ -8,11 +8,8 @@ class EAService {
   static String? _commonDataPath;
   
   Timer? _pollTimer;
-  Timer? _chartWatchTimer;
-  String? _lastChartContent;
   
   Function(List<Map<String, dynamic>>)? onAccountsUpdated;
-  Function(Map<String, dynamic>)? onChartDataReceived;
   Function(String)? onLog;
 
   /// Initialize the EA service
@@ -44,6 +41,20 @@ class EAService {
     _pollTimer = null;
   }
 
+  /// Read file with retry on access error (file might be locked by EA)
+  Future<String?> _readFileSafe(File file) async {
+    for (int i = 0; i < 3; i++) {
+      try {
+        return await file.readAsString();
+      } catch (e) {
+        if (i < 2) {
+          await Future.delayed(const Duration(milliseconds: 50));
+        }
+      }
+    }
+    return null;
+  }
+
   /// Get all connected accounts from EA status files
   Future<List<Map<String, dynamic>>> getAccounts() async {
     if (_commonDataPath == null) return [];
@@ -58,7 +69,8 @@ class EAService {
     await for (final entity in dir.list()) {
       if (entity is File && entity.path.contains('status_') && entity.path.endsWith('.json')) {
         try {
-          final content = await entity.readAsString();
+          final content = await _readFileSafe(entity);
+          if (content == null) continue;
           final data = jsonDecode(content) as Map<String, dynamic>;
           
           final stat = await entity.stat();
@@ -76,7 +88,7 @@ class EAService {
     return accounts;
   }
 
-  /// Get positions for a specific terminal (reads directly from file)
+  /// Get positions for a specific terminal
   Future<List<Map<String, dynamic>>> getPositions(int terminalIndex) async {
     if (_commonDataPath == null) return [];
 
@@ -86,12 +98,12 @@ class EAService {
     if (!await file.exists()) return [];
 
     try {
-      final content = await file.readAsString();
+      final content = await _readFileSafe(file);
+      if (content == null) return [];
       final data = jsonDecode(content) as Map<String, dynamic>;
       final positions = List<Map<String, dynamic>>.from(data['positions'] ?? []);
       return positions;
     } catch (e) {
-      onLog?.call('Error reading positions: $e');
       return [];
     }
   }
@@ -126,32 +138,29 @@ class EAService {
     final file = File(filePath);
     
     try {
-      // Add unique identifier to command
       command['timestamp'] = DateTime.now().millisecondsSinceEpoch;
       command['cmdId'] = '${DateTime.now().millisecondsSinceEpoch}_$terminalIndex';
       
       final json = jsonEncode(command);
       await file.writeAsString(json);
-      onLog?.call('Command written for terminal $terminalIndex: ${command['action']}');
+      onLog?.call('Command sent: ${command['action']}');
       
       // Wait for command file to be deleted (EA processed it)
-      for (int i = 0; i < 20; i++) {  // Wait up to 2 seconds
+      for (int i = 0; i < 20; i++) {
         await Future.delayed(const Duration(milliseconds: 100));
         if (!await file.exists()) {
-          onLog?.call('Command processed by terminal $terminalIndex');
           return true;
         }
       }
       
-      onLog?.call('Warning: Command may not have been processed by terminal $terminalIndex');
-      return true;  // Return true anyway, EA might have processed it
+      return true;
     } catch (e) {
       onLog?.call('Error sending command: $e');
       return false;
     }
   }
 
-  /// Place an order on specific terminal
+  /// Place an order
   Future<void> placeOrder({
     required String symbol,
     required String type,
@@ -183,19 +192,18 @@ class EAService {
     }
   }
 
-  /// Close a position - waits for confirmation
+  /// Close a position
   Future<bool> closePosition(int ticket, int terminalIndex) async {
-    onLog?.call('Closing position: ticket=$ticket on terminal $terminalIndex');
+    onLog?.call('Closing position: ticket=$ticket');
     return await sendCommandToTerminal(terminalIndex, {
       'action': 'close_position',
       'ticket': ticket,
     });
   }
 
-  /// Modify a position - waits for confirmation
-  /// sl/tp: null = keep existing (-1), 0 = remove, >0 = set new value
+  /// Modify a position
   Future<bool> modifyPosition(int ticket, int terminalIndex, {double? sl, double? tp}) async {
-    onLog?.call('Modifying position: ticket=$ticket, SL=$sl, TP=$tp on terminal $terminalIndex');
+    onLog?.call('Modifying position: ticket=$ticket');
     return await sendCommandToTerminal(terminalIndex, {
       'action': 'modify_position',
       'ticket': ticket,
@@ -204,139 +212,39 @@ class EAService {
     });
   }
 
-  /// Subscribe to chart updates - sends initial data then streams updates
+  /// Subscribe to chart - tells EA to start writing chart data
   Future<void> subscribeChart(String symbol, String timeframe, int terminalIndex) async {
-    onLog?.call('Subscribing to chart: $symbol $timeframe on terminal $terminalIndex');
-    
-    _lastChartContent = null;
-    
-    // Send subscribe command to EA - this will write history data
+    onLog?.call('Chart subscribe: $symbol $timeframe');
     await sendCommandToTerminal(terminalIndex, {
       'action': 'subscribe_chart',
       'symbol': symbol,
       'timeframe': timeframe,
     });
-    
-    // Immediately read the chart file to get history data
-    // (before it gets overwritten by updates)
-    await _readChartFileOnce(terminalIndex);
-    
-    // Now start watching for updates
-    _startChartFileWatcher(terminalIndex);
-  }
-  
-  /// Read chart file once (for initial history data)
-  Future<void> _readChartFileOnce(int terminalIndex) async {
-    if (_commonDataPath == null) return;
-    
-    final filePath = '$_commonDataPath\\Files\\$_bridgeFolder\\chart_$terminalIndex.json';
-    final file = File(filePath);
-    
-    // Try a few times in case file is still being written
-    for (int i = 0; i < 5; i++) {
-      if (!await file.exists()) {
-        await Future.delayed(const Duration(milliseconds: 100));
-        continue;
-      }
-      
-      try {
-        final content = await file.readAsString();
-        if (content.isEmpty) {
-          await Future.delayed(const Duration(milliseconds: 100));
-          continue;
-        }
-        
-        final data = jsonDecode(content) as Map<String, dynamic>;
-        
-        // Only forward if it's history data (has candles array)
-        if (data['type'] == 'history' && data['candles'] != null) {
-          _lastChartContent = content;
-          onChartDataReceived?.call(data);
-          onLog?.call('Chart history received: ${(data['candles'] as List).length} candles');
-          return;
-        }
-      } catch (e) {
-        // File might be being written, retry
-      }
-      
-      await Future.delayed(const Duration(milliseconds: 100));
-    }
-    
-    onLog?.call('Warning: Could not read chart history data');
   }
 
-  /// Unsubscribe from chart updates
+  /// Unsubscribe from chart
   Future<void> unsubscribeChart(int terminalIndex) async {
-    onLog?.call('Unsubscribing from chart on terminal $terminalIndex');
-    
-    _stopChartFileWatcher();
-    
+    onLog?.call('Chart unsubscribe');
     await sendCommandToTerminal(terminalIndex, {
       'action': 'unsubscribe_chart',
     });
   }
 
-  /// Start watching chart file for updates
-  int _watcherTicks = 0;
-  
-  void _startChartFileWatcher(int terminalIndex) {
-    _stopChartFileWatcher();
-    _lastChartContent = null;
-    _watcherTicks = 0;
-    
-    onLog?.call('Starting chart file watcher for terminal $terminalIndex');
-    
-    // Poll chart file every 500ms for updates (matching EA timer)
-    _chartWatchTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
-      _watcherTicks++;
-      if (_watcherTicks <= 10 || _watcherTicks % 20 == 0) {
-        onLog?.call('Watcher tick #$_watcherTicks');
-      }
-      _checkChartFile(terminalIndex);
-    });
-  }
-
-  /// Stop watching chart file
-  void _stopChartFileWatcher() {
-    if (_chartWatchTimer != null) {
-      onLog?.call('Stopping chart file watcher');
-    }
-    _chartWatchTimer?.cancel();
-    _chartWatchTimer = null;
-    _lastChartContent = null;
-  }
-
-  /// Check chart file for updates and forward to callback
-  Future<void> _checkChartFile(int terminalIndex) async {
-    if (_commonDataPath == null) return;
+  /// Get current chart data from file (called on demand by mobile polling)
+  Future<Map<String, dynamic>?> getChartData(int terminalIndex) async {
+    if (_commonDataPath == null) return null;
     
     final filePath = '$_commonDataPath\\Files\\$_bridgeFolder\\chart_$terminalIndex.json';
     final file = File(filePath);
     
-    if (!await file.exists()) return;
+    if (!await file.exists()) return null;
     
     try {
-      final content = await file.readAsString();
-      if (content.isEmpty) return;
-      
-      final data = jsonDecode(content) as Map<String, dynamic>;
-      
-      // For updates, always forward (don't compare content)
-      // For history, skip if same (shouldn't happen but just in case)
-      if (data['type'] == 'update') {
-        // Only skip if candle data is exactly the same
-        final candleStr = data['candle']?.toString() ?? '';
-        if (candleStr == _lastChartContent) return;
-        _lastChartContent = candleStr;
-        
-        onChartDataReceived?.call(data);
-      } else if (data['type'] == 'history') {
-        if (content == _lastChartContent) return;
-        _lastChartContent = content;
-        onChartDataReceived?.call(data);
-      }
+      final content = await _readFileSafe(file);
+      if (content == null || content.isEmpty) return null;
+      return jsonDecode(content) as Map<String, dynamic>;
     } catch (e) {
-      // Ignore file read errors (file might be being written)
+      return null;
     }
   }
 
@@ -365,6 +273,5 @@ class EAService {
 
   void dispose() {
     stopPolling();
-    _stopChartFileWatcher();
   }
 }
