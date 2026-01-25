@@ -30,6 +30,7 @@ string g_lastCommandHash = "";
 bool   g_chartSubscribed = false;
 string g_chartSymbol = "";
 int    g_chartTimeframe = PERIOD_M15;
+int    g_chartDelayCount = 0;  // Delay counter to let history be read
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                    |
@@ -82,7 +83,16 @@ void OnTimer()
    // If chart is subscribed, update the current candle
    if(g_chartSubscribed)
    {
-      WriteChartUpdate();
+      // Wait for delay to expire before sending updates
+      // This gives the bridge time to read the history first
+      if(g_chartDelayCount > 0)
+      {
+         g_chartDelayCount--;
+      }
+      else
+      {
+         WriteChartUpdate();
+      }
    }
 }
 
@@ -416,13 +426,14 @@ void ProcessCommand(string jsonCommand)
       g_chartSymbol = ExtractJsonString(jsonCommand, "symbol");
       string tf = ExtractJsonString(jsonCommand, "timeframe");
       g_chartTimeframe = StringToTimeframe(tf);
-      g_chartSubscribed = false;  // Don't start updates yet
       Print("CHART SUBSCRIBE: symbol=", g_chartSymbol, " tf=", g_chartTimeframe);
       
-      // Send initial data immediately
+      // Send initial history data
       WriteChartData(g_chartSymbol, g_chartTimeframe, 200);
       
-      // Delay enabling updates to ensure history is read first
+      // Start subscription but delay updates for ~2 seconds (4 timer cycles at 500ms)
+      // This gives the bridge time to read the history data
+      g_chartDelayCount = 4;
       g_chartSubscribed = true;
    }
    else if(action == "unsubscribe_chart")

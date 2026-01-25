@@ -312,6 +312,11 @@ class EAService {
       _lastChartContent = content;
       final data = jsonDecode(content) as Map<String, dynamic>;
       
+      // Log update received
+      if (data['type'] == 'update') {
+        onLog?.call('Chart update received');
+      }
+      
       // Forward chart data to callback
       onChartDataReceived?.call(data);
     } catch (e) {

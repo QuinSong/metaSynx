@@ -158,6 +158,7 @@ class _ChartScreenState extends State<ChartScreen> {
     if (data == null) return;
     
     final type = data['type'] as String?;
+    debugPrint('Chart data received: type=$type');
     
     if (type == 'history') {
       // Initial historical data
@@ -167,10 +168,12 @@ class _ChartScreenState extends State<ChartScreen> {
         final candlesJson = _candlesToJson(candles);
         _controller.runJavaScript('setChartData($candlesJson);');
         setState(() => _isLoading = false);
+        debugPrint('Chart history set: ${candles.length} candles');
       }
     } else if (type == 'update') {
       // Live candle update
       final candle = data['candle'] as Map<String, dynamic>?;
+      debugPrint('Chart update: candle=$candle, hasReceivedData=$_hasReceivedData');
       if (candle != null && _hasReceivedData) {
         final candleJson = _candleToJson(candle);
         _controller.runJavaScript('updateCandle($candleJson);');
