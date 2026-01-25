@@ -124,14 +124,6 @@ class _HomeScreenState extends State<HomeScreen> {
         _handleModifyPosition(message);
         break;
 
-      case 'subscribe_chart':
-        _handleSubscribeChart(message);
-        break;
-
-      case 'unsubscribe_chart':
-        _handleUnsubscribeChart(message);
-        break;
-
       case 'get_chart_data':
         _handleGetChartData(message);
         break;
@@ -219,29 +211,14 @@ class _HomeScreenState extends State<HomeScreen> {
     _addLog('Modify command sent for ticket=$ticket');
   }
 
-  Future<void> _handleSubscribeChart(Map<String, dynamic> message) async {
+  Future<void> _handleGetChartData(Map<String, dynamic> message) async {
     final symbol = message['symbol'] as String?;
     final timeframe = message['timeframe'] as String?;
     final terminalIndex = message['terminalIndex'] as int? ?? 0;
     
-    if (symbol == null || timeframe == null) {
-      _addLog('Subscribe chart: missing symbol or timeframe');
-      return;
-    }
+    if (symbol == null || timeframe == null) return;
     
-    _addLog('Chart subscribe: $symbol $timeframe on terminal $terminalIndex');
-    await _eaService.subscribeChart(symbol, timeframe, terminalIndex);
-  }
-
-  Future<void> _handleUnsubscribeChart(Map<String, dynamic> message) async {
-    final terminalIndex = message['terminalIndex'] as int? ?? 0;
-    _addLog('Chart unsubscribe on terminal $terminalIndex');
-    await _eaService.unsubscribeChart(terminalIndex);
-  }
-
-  Future<void> _handleGetChartData(Map<String, dynamic> message) async {
-    final terminalIndex = message['terminalIndex'] as int? ?? 0;
-    final data = await _eaService.getChartData(terminalIndex);
+    final data = await _eaService.getChartData(symbol, timeframe, terminalIndex);
     if (data != null) {
       _connection?.send({
         'action': 'chart_data',

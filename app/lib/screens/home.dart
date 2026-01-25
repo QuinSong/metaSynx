@@ -280,25 +280,11 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  void _subscribeChart(String symbol, String timeframe, int terminalIndex) {
-    _connection.send({
-      'action': 'subscribe_chart',
-      'symbol': symbol,
-      'timeframe': timeframe,
-      'terminalIndex': terminalIndex,
-    });
-  }
-
-  void _unsubscribeChart(int terminalIndex) {
-    _connection.send({
-      'action': 'unsubscribe_chart',
-      'terminalIndex': terminalIndex,
-    });
-  }
-
-  void _requestChartData(int terminalIndex) {
+  void _requestChartData(String symbol, String timeframe, int terminalIndex) {
     _connection.send({
       'action': 'get_chart_data',
+      'symbol': symbol,
+      'timeframe': timeframe,
       'terminalIndex': terminalIndex,
     });
   }
@@ -563,8 +549,6 @@ class _HomeScreenState extends State<HomeScreen> {
           confirmBeforeClose: _confirmBeforeClose,
           onConfirmBeforeCloseChanged: _updateConfirmBeforeClose,
           chartDataStream: _chartDataController.stream,
-          onSubscribeChart: _subscribeChart,
-          onUnsubscribeChart: _unsubscribeChart,
           onRequestChartData: _requestChartData,
         ),
       ),

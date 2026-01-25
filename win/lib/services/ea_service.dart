@@ -212,28 +212,18 @@ class EAService {
     });
   }
 
-  /// Subscribe to chart - tells EA to start writing chart data
-  Future<void> subscribeChart(String symbol, String timeframe, int terminalIndex) async {
-    onLog?.call('Chart subscribe: $symbol $timeframe');
+  /// Get chart data - sends command to EA and reads response
+  Future<Map<String, dynamic>?> getChartData(String symbol, String timeframe, int terminalIndex) async {
+    if (_commonDataPath == null) return null;
+    
+    // Send get_chart_data command to EA
     await sendCommandToTerminal(terminalIndex, {
-      'action': 'subscribe_chart',
+      'action': 'get_chart_data',
       'symbol': symbol,
       'timeframe': timeframe,
     });
-  }
-
-  /// Unsubscribe from chart
-  Future<void> unsubscribeChart(int terminalIndex) async {
-    onLog?.call('Chart unsubscribe');
-    await sendCommandToTerminal(terminalIndex, {
-      'action': 'unsubscribe_chart',
-    });
-  }
-
-  /// Get current chart data from file (called on demand by mobile polling)
-  Future<Map<String, dynamic>?> getChartData(int terminalIndex) async {
-    if (_commonDataPath == null) return null;
     
+    // Read the chart file
     final filePath = '$_commonDataPath\\Files\\$_bridgeFolder\\chart_$terminalIndex.json';
     final file = File(filePath);
     
