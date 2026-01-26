@@ -15,6 +15,25 @@ class PositionDetailScreen extends StatefulWidget {
   final bool showPLPercent;
   final bool confirmBeforeClose;
   final void Function(bool) onConfirmBeforeCloseChanged;
+  // For ChartScreen
+  final Map<String, String> symbolSuffixes;
+  final Map<String, double> lotRatios;
+  final Set<String> preferredPairs;
+  final void Function({
+    required String symbol,
+    required String type,
+    required double lots,
+    required double? tp,
+    required double? sl,
+    required List<int> accountIndices,
+    required bool useRatios,
+    required bool applySuffix,
+  }) onPlaceOrder;
+  // Chart streaming (optional - may not be available from position screen)
+  final Stream<Map<String, dynamic>>? chartDataStream;
+  final void Function(String symbol, String timeframe, int terminalIndex)? onRequestChartData;
+  final void Function(String symbol, String timeframe, int terminalIndex)? onSubscribeChart;
+  final void Function(int terminalIndex)? onUnsubscribeChart;
 
   const PositionDetailScreen({
     super.key,
@@ -29,6 +48,14 @@ class PositionDetailScreen extends StatefulWidget {
     required this.showPLPercent,
     required this.confirmBeforeClose,
     required this.onConfirmBeforeCloseChanged,
+    required this.symbolSuffixes,
+    required this.lotRatios,
+    required this.preferredPairs,
+    required this.onPlaceOrder,
+    this.chartDataStream,
+    this.onRequestChartData,
+    this.onSubscribeChart,
+    this.onUnsubscribeChart,
   });
 
   @override
@@ -410,30 +437,30 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
       return;
     }
 
-    // Get open price and position type for validation
-    final openPrice = (widget.position['openPrice'] as num?)?.toDouble() ?? 0;
+    // Get current price and position type for validation
+    final currentPrice = (widget.position['currentPrice'] as num?)?.toDouble() ?? 0;
     final type = (widget.position['type'] as String? ?? '').toLowerCase();
     final isBuy = type == 'buy';
 
-    // Validate SL/TP based on position type
+    // Validate SL/TP based on position type and current price
     if (isBuy) {
-      // BUY: SL must be below entry, TP must be above entry
-      if (sl != null && sl > 0 && sl >= openPrice) {
-        _showError('Stop Loss must be below entry price for BUY positions');
+      // BUY: SL must be below current price, TP must be above current price
+      if (sl != null && sl > 0 && sl >= currentPrice) {
+        _showError('Stop Loss must be below current price for BUY positions');
         return;
       }
-      if (tp != null && tp > 0 && tp <= openPrice) {
-        _showError('Take Profit must be above entry price for BUY positions');
+      if (tp != null && tp > 0 && tp <= currentPrice) {
+        _showError('Take Profit must be above current price for BUY positions');
         return;
       }
     } else {
-      // SELL: SL must be above entry, TP must be below entry
-      if (sl != null && sl > 0 && sl <= openPrice) {
-        _showError('Stop Loss must be above entry price for SELL positions');
+      // SELL: SL must be above current price, TP must be below current price
+      if (sl != null && sl > 0 && sl <= currentPrice) {
+        _showError('Stop Loss must be above current price for SELL positions');
         return;
       }
-      if (tp != null && tp > 0 && tp >= openPrice) {
-        _showError('Take Profit must be below entry price for SELL positions');
+      if (tp != null && tp > 0 && tp >= currentPrice) {
+        _showError('Take Profit must be below current price for SELL positions');
         return;
       }
     }
@@ -543,6 +570,14 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
           showPLPercent: widget.showPLPercent,
           confirmBeforeClose: widget.confirmBeforeClose,
           onConfirmBeforeCloseChanged: widget.onConfirmBeforeCloseChanged,
+          chartDataStream: widget.chartDataStream,
+          onRequestChartData: widget.onRequestChartData,
+          onSubscribeChart: widget.onSubscribeChart,
+          onUnsubscribeChart: widget.onUnsubscribeChart,
+          symbolSuffixes: widget.symbolSuffixes,
+          lotRatios: widget.lotRatios,
+          preferredPairs: widget.preferredPairs,
+          onPlaceOrder: widget.onPlaceOrder,
         ),
       ),
     );

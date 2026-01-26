@@ -2,7 +2,7 @@ import os
 import time
 
 
-msg = '9th mt4 candle data attempt, WORKING!'
+msg = '1st subscribe mt4 candle data attempt'
 
 
 os.system('git add .')

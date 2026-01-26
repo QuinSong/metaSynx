@@ -7,6 +7,9 @@ class NewOrderScreen extends StatefulWidget {
   final String? mainAccountNum;
   final Map<String, double> lotRatios;
   final Set<String> preferredPairs;
+  final Map<String, String> symbolSuffixes;
+  final String? initialSymbol;
+  final String? initialOrderType;
   final void Function({
     required String symbol,
     required String type,
@@ -25,6 +28,9 @@ class NewOrderScreen extends StatefulWidget {
     required this.mainAccountNum,
     required this.lotRatios,
     required this.preferredPairs,
+    required this.symbolSuffixes,
+    this.initialSymbol,
+    this.initialOrderType,
     required this.onPlaceOrder,
   });
 
@@ -75,6 +81,37 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
     _selectedAccountIndices = widget.accounts
         .map((a) => a['index'] as int)
         .toSet();
+    
+    // Set initial order type if provided
+    if (widget.initialOrderType != null) {
+      _orderType = widget.initialOrderType!;
+    }
+    
+    // Set initial symbol if provided, detecting and stripping suffix
+    if (widget.initialSymbol != null && widget.initialSymbol!.isNotEmpty) {
+      _setSymbolWithSuffixDetection(widget.initialSymbol!);
+    }
+  }
+  
+  void _setSymbolWithSuffixDetection(String symbol) {
+    // Check if symbol ends with any configured suffix
+    String? detectedSuffix;
+    for (final suffix in widget.symbolSuffixes.values) {
+      if (suffix.isNotEmpty && symbol.toUpperCase().endsWith(suffix.toUpperCase())) {
+        detectedSuffix = suffix;
+        break;
+      }
+    }
+    
+    if (detectedSuffix != null) {
+      // Strip suffix and enable suffix toggle
+      final baseSymbol = symbol.substring(0, symbol.length - detectedSuffix.length);
+      _symbolController.text = baseSymbol;
+      _applySuffix = true;
+    } else {
+      _symbolController.text = symbol;
+      _applySuffix = false;
+    }
   }
 
   @override
@@ -325,7 +362,17 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
             ),
           ),
         ),
-        const SizedBox(width: 8),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          child: Text(
+            '+',
+            style: TextStyle(
+              color: AppColors.textSecondary,
+              fontSize: 20,
+              fontWeight: FontWeight.w300,
+            ),
+          ),
+        ),
         GestureDetector(
           onTap: () {
             setState(() {

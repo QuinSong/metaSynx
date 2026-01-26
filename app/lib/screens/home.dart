@@ -289,6 +289,22 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
+  void _subscribeChart(String symbol, String timeframe, int terminalIndex) {
+    _connection.send({
+      'action': 'subscribe_chart',
+      'symbol': symbol,
+      'timeframe': timeframe,
+      'terminalIndex': terminalIndex,
+    });
+  }
+
+  void _unsubscribeChart(int terminalIndex) {
+    _connection.send({
+      'action': 'unsubscribe_chart',
+      'terminalIndex': terminalIndex,
+    });
+  }
+
   void _openAccountDetail(Map<String, dynamic> account) {
     Navigator.push(
       context,
@@ -305,6 +321,14 @@ class _HomeScreenState extends State<HomeScreen> {
           showPLPercent: _showPLPercent,
           confirmBeforeClose: _confirmBeforeClose,
           onConfirmBeforeCloseChanged: _updateConfirmBeforeClose,
+          symbolSuffixes: _symbolSuffixes,
+          lotRatios: _lotRatios,
+          preferredPairs: _preferredPairs,
+          onPlaceOrder: _placeOrder,
+          chartDataStream: _chartDataController.stream,
+          onRequestChartData: _requestChartData,
+          onSubscribeChart: _subscribeChart,
+          onUnsubscribeChart: _unsubscribeChart,
         ),
       ),
     );
@@ -320,6 +344,7 @@ class _HomeScreenState extends State<HomeScreen> {
           mainAccountNum: _mainAccountNum,
           lotRatios: _lotRatios,
           preferredPairs: _preferredPairs,
+          symbolSuffixes: _symbolSuffixes,
           onPlaceOrder: _placeOrder,
         ),
       ),
@@ -493,7 +518,7 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       floatingActionButton: showFab
           ? FloatingActionButton.extended(
-              heroTag: 'home_new_order_fab',
+              heroTag: null,
               onPressed: _openNewOrder,
               backgroundColor: AppColors.primary,
               icon: const Icon(Icons.add, color: Colors.black),
@@ -550,6 +575,12 @@ class _HomeScreenState extends State<HomeScreen> {
           onConfirmBeforeCloseChanged: _updateConfirmBeforeClose,
           chartDataStream: _chartDataController.stream,
           onRequestChartData: _requestChartData,
+          onSubscribeChart: _subscribeChart,
+          onUnsubscribeChart: _unsubscribeChart,
+          symbolSuffixes: _symbolSuffixes,
+          lotRatios: _lotRatios,
+          preferredPairs: _preferredPairs,
+          onPlaceOrder: _placeOrder,
         ),
       ),
     );

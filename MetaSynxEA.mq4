@@ -251,12 +251,29 @@ void WritePositions()
 //+------------------------------------------------------------------+
 void WriteChartData(string symbol, int timeframe, int count)
 {
+   // Safety check - ensure we have valid market data
+   double testBid = MarketInfo(symbol, MODE_BID);
+   if(testBid <= 0)
+   {
+      Print("WriteChartData: No market data for ", symbol);
+      return;
+   }
+   
    int digits = (int)MarketInfo(symbol, MODE_DIGITS);
+   double bid = testBid;
+   double ask = MarketInfo(symbol, MODE_ASK);
+   double point = MarketInfo(symbol, MODE_POINT);
+   double spread = 0;
+   if(point > 0 && bid > 0 && ask > 0) spread = (ask - bid) / point;
+   if(spread < 0 || spread > 10000) spread = 0; // Sanity check
    
    string json = "{";
    json += "\"type\":\"history\",";
    json += "\"symbol\":\"" + symbol + "\",";
    json += "\"timeframe\":" + IntegerToString(timeframe) + ",";
+   json += "\"bid\":" + DoubleToString(bid, digits) + ",";
+   json += "\"ask\":" + DoubleToString(ask, digits) + ",";
+   json += "\"spread\":" + DoubleToString(spread, 1) + ",";
    json += "\"candles\":[";
    
    int available = iBars(symbol, timeframe);
@@ -302,7 +319,17 @@ void WriteChartUpdate()
 {
    if(!g_chartSubscribed || g_chartSymbol == "") return;
    
+   // Safety check - ensure we have valid market data before proceeding
+   double testBid = MarketInfo(g_chartSymbol, MODE_BID);
+   if(testBid <= 0) return; // Symbol data not ready, skip this update
+   
    int digits = (int)MarketInfo(g_chartSymbol, MODE_DIGITS);
+   double bid = testBid;
+   double ask = MarketInfo(g_chartSymbol, MODE_ASK);
+   double point = MarketInfo(g_chartSymbol, MODE_POINT);
+   double spread = 0;
+   if(point > 0 && bid > 0 && ask > 0) spread = (ask - bid) / point;
+   if(spread < 0 || spread > 10000) spread = 0; // Sanity check
    
    datetime barTime = iTime(g_chartSymbol, g_chartTimeframe, 0);
    double open = iOpen(g_chartSymbol, g_chartTimeframe, 0);
@@ -314,6 +341,9 @@ void WriteChartUpdate()
    json += "\"type\":\"update\",";
    json += "\"symbol\":\"" + g_chartSymbol + "\",";
    json += "\"timeframe\":" + IntegerToString(g_chartTimeframe) + ",";
+   json += "\"bid\":" + DoubleToString(bid, digits) + ",";
+   json += "\"ask\":" + DoubleToString(ask, digits) + ",";
+   json += "\"spread\":" + DoubleToString(spread, 1) + ",";
    json += "\"candle\":{";
    json += "\"time\":" + IntegerToString((long)barTime) + ",";
    json += "\"open\":" + DoubleToString(open, digits) + ",";
@@ -417,6 +447,9 @@ void ProcessCommand(string jsonCommand)
       int count = (int)StringToInteger(ExtractJsonString(jsonCommand, "count"));
       if(count <= 0) count = 200;
       
+      // Ensure symbol is in Market Watch
+      SymbolSelect(symbol, true);
+      
       int timeframe = StringToTimeframe(tf);
       Print("CHART DATA: symbol=", symbol, " tf=", tf, " (", timeframe, ") count=", count);
       WriteChartData(symbol, timeframe, count);
@@ -449,6 +482,14 @@ void ProcessCommand(string jsonCommand)
 //+------------------------------------------------------------------+
 void PlaceOrder(string symbol, string type, double lots, double sl, double tp, int magic)
 {
+   // Ensure symbol is in Market Watch
+   if(!SymbolSelect(symbol, true))
+   {
+      Print("Warning: Could not add symbol to Market Watch: ", symbol);
+   }
+   
+   // Wait a moment for symbol data to load
+   Sleep(100);
    RefreshRates();
    
    int orderType;
@@ -459,7 +500,18 @@ void PlaceOrder(string symbol, string type, double lots, double sl, double tp, i
    else if(type == "sell") { orderType = OP_SELL; price = MarketInfo(symbol, MODE_BID); arrowColor = clrRed; }
    else { WriteResponse(false, "Invalid order type", 0); return; }
    
-   if(MarketInfo(symbol, MODE_BID) == 0) { WriteResponse(false, "Invalid symbol", 0); return; }
+   // Check if symbol data is available
+   if(MarketInfo(symbol, MODE_BID) == 0)
+   {
+      // Try waiting a bit longer for data
+      Sleep(500);
+      RefreshRates();
+      if(MarketInfo(symbol, MODE_BID) == 0)
+      {
+         WriteResponse(false, "Symbol not available: " + symbol, 0);
+         return;
+      }
+   }
    
    double minLot = MarketInfo(symbol, MODE_MINLOT);
    double maxLot = MarketInfo(symbol, MODE_MAXLOT);

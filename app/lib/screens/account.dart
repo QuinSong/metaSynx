@@ -17,6 +17,25 @@ class AccountDetailScreen extends StatefulWidget {
   final bool showPLPercent;
   final bool confirmBeforeClose;
   final void Function(bool) onConfirmBeforeCloseChanged;
+  // For PositionDetailScreen -> ChartScreen
+  final Map<String, String> symbolSuffixes;
+  final Map<String, double> lotRatios;
+  final Set<String> preferredPairs;
+  final void Function({
+    required String symbol,
+    required String type,
+    required double lots,
+    required double? tp,
+    required double? sl,
+    required List<int> accountIndices,
+    required bool useRatios,
+    required bool applySuffix,
+  }) onPlaceOrder;
+  // Chart streaming
+  final Stream<Map<String, dynamic>>? chartDataStream;
+  final void Function(String symbol, String timeframe, int terminalIndex)? onRequestChartData;
+  final void Function(String symbol, String timeframe, int terminalIndex)? onSubscribeChart;
+  final void Function(int terminalIndex)? onUnsubscribeChart;
 
   const AccountDetailScreen({
     super.key,
@@ -31,6 +50,14 @@ class AccountDetailScreen extends StatefulWidget {
     required this.showPLPercent,
     required this.confirmBeforeClose,
     required this.onConfirmBeforeCloseChanged,
+    required this.symbolSuffixes,
+    required this.lotRatios,
+    required this.preferredPairs,
+    required this.onPlaceOrder,
+    this.chartDataStream,
+    this.onRequestChartData,
+    this.onSubscribeChart,
+    this.onUnsubscribeChart,
   });
 
   @override
@@ -807,6 +834,14 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
           showPLPercent: widget.showPLPercent,
           confirmBeforeClose: widget.confirmBeforeClose,
           onConfirmBeforeCloseChanged: widget.onConfirmBeforeCloseChanged,
+          symbolSuffixes: widget.symbolSuffixes,
+          lotRatios: widget.lotRatios,
+          preferredPairs: widget.preferredPairs,
+          onPlaceOrder: widget.onPlaceOrder,
+          chartDataStream: widget.chartDataStream,
+          onRequestChartData: widget.onRequestChartData,
+          onSubscribeChart: widget.onSubscribeChart,
+          onUnsubscribeChart: widget.onUnsubscribeChart,
         ),
       ),
     );

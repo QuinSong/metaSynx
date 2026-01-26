@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../core/theme.dart';
 import 'position.dart';
+import 'new_order.dart';
 
 class ChartScreen extends StatefulWidget {
   final List<Map<String, dynamic>> positions;
@@ -10,8 +12,7 @@ class ChartScreen extends StatefulWidget {
   final List<Map<String, dynamic>> accounts;
   final String? initialSymbol;
   final void Function(int ticket, int terminalIndex) onClosePosition;
-  final void Function(int ticket, int terminalIndex, double? sl, double? tp)
-  onModifyPosition;
+  final void Function(int ticket, int terminalIndex, double? sl, double? tp) onModifyPosition;
   final Map<String, String> accountNames;
   final String? mainAccountNum;
   final bool includeCommissionSwap;
@@ -20,8 +21,23 @@ class ChartScreen extends StatefulWidget {
   final void Function(bool) onConfirmBeforeCloseChanged;
   // MT4 chart data
   final Stream<Map<String, dynamic>>? chartDataStream;
-  final void Function(String symbol, String timeframe, int terminalIndex)?
-  onRequestChartData;
+  final void Function(String symbol, String timeframe, int terminalIndex)? onRequestChartData;
+  final void Function(String symbol, String timeframe, int terminalIndex)? onSubscribeChart;
+  final void Function(int terminalIndex)? onUnsubscribeChart;
+  // New order
+  final Map<String, String> symbolSuffixes;
+  final Map<String, double> lotRatios;
+  final Set<String> preferredPairs;
+  final void Function({
+    required String symbol,
+    required String type,
+    required double lots,
+    required double? tp,
+    required double? sl,
+    required List<int> accountIndices,
+    required bool useRatios,
+    required bool applySuffix,
+  }) onPlaceOrder;
 
   const ChartScreen({
     super.key,
@@ -39,6 +55,12 @@ class ChartScreen extends StatefulWidget {
     required this.onConfirmBeforeCloseChanged,
     this.chartDataStream,
     this.onRequestChartData,
+    this.onSubscribeChart,
+    this.onUnsubscribeChart,
+    required this.symbolSuffixes,
+    required this.lotRatios,
+    required this.preferredPairs,
+    required this.onPlaceOrder,
   });
 
   @override
@@ -53,8 +75,23 @@ class _ChartScreenState extends State<ChartScreen> {
   bool _hasReceivedData = false;
   int? _selectedAccountIndex;
   final TextEditingController _symbolController = TextEditingController();
+  final FocusNode _symbolFocusNode = FocusNode();
   Timer? _chartPollTimer;
   StreamSubscription<Map<String, dynamic>>? _chartDataSubscription;
+  int? _currentSpread;
+  double? _currentBid;
+  double? _currentAsk;
+  bool _showBidAskLines = false;
+  
+  // Search overlay
+  bool _showSearchOverlay = false;
+  List<String> _recentSearches = [];
+  
+  // Preferred symbols (common forex pairs)
+  final List<String> _preferredSymbols = [
+    'EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF', 'AUDUSD', 'USDCAD', 'NZDUSD',
+    'EURGBP', 'EURJPY', 'GBPJPY', 'XAUUSD', 'XAGUSD', 'BTCUSD', 'ETHUSD',
+  ];
 
   final List<Map<String, String>> _timeframes = [
     {'label': '1m', 'value': '1'},
@@ -67,34 +104,97 @@ class _ChartScreenState extends State<ChartScreen> {
     {'label': '1W', 'value': 'W'},
   ];
 
-  bool get _useMT4Data =>
-      widget.chartDataStream != null && widget.onRequestChartData != null;
+  bool get _useMT4Data => 
+      widget.chartDataStream != null && 
+      widget.onRequestChartData != null;
 
   @override
   void initState() {
     super.initState();
+    
+    // Initialize WebView controller first (synchronous)
+    _initWebView();
+    
+    // Then load preferences (async)
+    _loadSavedPreferences();
+  }
 
-    // Set first account as default
-    if (widget.accounts.isNotEmpty) {
+  Future<void> _loadSavedPreferences() async {
+    final prefs = await SharedPreferences.getInstance();
+    
+    // Load saved account index
+    final savedAccountIndex = prefs.getInt('chart_account_index');
+    final savedSymbol = prefs.getString('chart_symbol');
+    final savedTimeframe = prefs.getString('chart_timeframe');
+    
+    // Load recent searches
+    _recentSearches = prefs.getStringList('chart_recent_searches') ?? [];
+    
+    // Validate and set account index
+    if (savedAccountIndex != null && savedAccountIndex < widget.accounts.length) {
+      _selectedAccountIndex = savedAccountIndex;
+    } else if (widget.accounts.isNotEmpty) {
       _selectedAccountIndex = 0;
     }
-
-    // Set initial symbol
+    
+    // Validate and set symbol
     if (widget.initialSymbol != null && widget.initialSymbol!.isNotEmpty) {
+      // If opened with a specific symbol, use that
       _currentSymbol = widget.initialSymbol!;
+    } else if (savedSymbol != null && savedSymbol.isNotEmpty) {
+      // Check if saved symbol still exists in positions
+      final allSymbols = _getAllSymbols();
+      if (allSymbols.contains(savedSymbol.toUpperCase())) {
+        _currentSymbol = savedSymbol;
+      } else if (widget.positions.isNotEmpty) {
+        _currentSymbol = widget.positions.first['symbol'] as String? ?? 'EURUSD';
+      }
     } else if (widget.positions.isNotEmpty) {
       _currentSymbol = widget.positions.first['symbol'] as String? ?? 'EURUSD';
     }
+    
+    // Validate and set timeframe
+    if (savedTimeframe != null && _timeframes.any((tf) => tf['value'] == savedTimeframe)) {
+      _currentInterval = savedTimeframe;
+    }
+    
+    // Detect if current symbol has suffix and update state accordingly
     _symbolController.text = _currentSymbol;
-
+    
     // Listen for chart data updates via stream
     if (_useMT4Data) {
-      _chartDataSubscription = widget.chartDataStream!.listen(
-        _onChartDataReceived,
-      );
+      _chartDataSubscription = widget.chartDataStream!.listen(_onChartDataReceived);
     }
+    
+    // Add focus listener to show/hide overlay
+    _symbolFocusNode.addListener(_onFocusChange);
+    
+    // Load chart with restored settings
+    setState(() {});
+    _controller.loadHtmlString(_buildLightweightChartsHtml());
+    
+    // Save current choices
+    _savePreferences();
+  }
 
-    _initWebView();
+  Set<String> _getAllSymbols() {
+    final symbols = <String>{};
+    for (final pos in widget.positions) {
+      final symbol = pos['symbol'] as String?;
+      if (symbol != null && symbol.isNotEmpty) {
+        symbols.add(symbol.toUpperCase());
+      }
+    }
+    return symbols;
+  }
+
+  Future<void> _savePreferences() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (_selectedAccountIndex != null) {
+      await prefs.setInt('chart_account_index', _selectedAccountIndex!);
+    }
+    await prefs.setString('chart_symbol', _currentSymbol);
+    await prefs.setString('chart_timeframe', _currentInterval);
   }
 
   void _initWebView() {
@@ -111,6 +211,17 @@ class _ChartScreenState extends State<ChartScreen> {
         'ChartReady',
         onMessageReceived: (JavaScriptMessage message) {
           _onChartReady();
+        },
+      )
+      ..addJavaScriptChannel(
+        'TimeframeSelect',
+        onMessageReceived: (JavaScriptMessage message) {
+          if (mounted) {
+            setState(() {
+              _currentInterval = message.message;
+            });
+            _loadChart();
+          }
         },
       )
       ..setNavigationDelegate(
@@ -130,20 +241,13 @@ class _ChartScreenState extends State<ChartScreen> {
   }
 
   void _onChartReady() {
-    // Chart is initialized, now start polling for data from MT4
+    // Chart is initialized, now subscribe for data from MT4
     if (_useMT4Data && _selectedAccountIndex != null) {
       _hasReceivedData = false;
-
-      // Request initial chart data
-      widget.onRequestChartData!(
-        _currentSymbol,
-        _currentInterval,
-        _selectedAccountIndex!,
-      );
-
-      // Start polling for updates every 500ms
-      _startChartPolling();
-
+      
+      // Subscribe to chart updates (EA will send initial history + continuous updates)
+      _subscribeToChart();
+      
       // Set a timeout - if no data after 5 seconds, show error
       Future.delayed(const Duration(seconds: 5), () {
         if (mounted && !_hasReceivedData && _isLoading) {
@@ -165,17 +269,16 @@ class _ChartScreenState extends State<ChartScreen> {
     }
   }
 
-  void _startChartPolling() {
-    _stopChartPolling();
-    _chartPollTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
-      if (_selectedAccountIndex != null && _useMT4Data) {
-        widget.onRequestChartData!(
-          _currentSymbol,
-          _currentInterval,
-          _selectedAccountIndex!,
-        );
-      }
-    });
+  void _subscribeToChart() {
+    if (_selectedAccountIndex != null && _useMT4Data && widget.onSubscribeChart != null) {
+      widget.onSubscribeChart!(_currentSymbol, _currentInterval, _selectedAccountIndex!);
+    }
+  }
+
+  void _unsubscribeFromChart() {
+    if (_selectedAccountIndex != null && widget.onUnsubscribeChart != null) {
+      widget.onUnsubscribeChart!(_selectedAccountIndex!);
+    }
   }
 
   void _stopChartPolling() {
@@ -187,15 +290,36 @@ class _ChartScreenState extends State<ChartScreen> {
     // Verify data matches current request (ignore stale responses)
     final dataSymbol = data['symbol'] as String?;
     final dataTimeframe = data['timeframe']?.toString();
-
+    
     if (dataSymbol != null && dataSymbol != _currentSymbol) return;
     if (dataTimeframe != null && dataTimeframe != _currentInterval) return;
-
+    
+    // Extract spread if available and update display
+    final spread = data['spread'];
+    if (spread != null) {
+      final spreadValue = (spread is num) ? spread.toDouble() : double.tryParse(spread.toString());
+      if (spreadValue != null) {
+        _currentSpread = spreadValue.round();
+        _controller.runJavaScript('updateSpread(${_currentSpread});');
+      }
+    }
+    
+    // Extract bid/ask for bid/ask lines
+    final bid = data['bid'];
+    final ask = data['ask'];
+    if (bid != null && ask != null) {
+      _currentBid = (bid is num) ? bid.toDouble() : double.tryParse(bid.toString());
+      _currentAsk = (ask is num) ? ask.toDouble() : double.tryParse(ask.toString());
+      if (_showBidAskLines && _currentBid != null && _currentAsk != null) {
+        _controller.runJavaScript('updateBidAskLines($_currentBid, $_currentAsk);');
+      }
+    }
+    
     final candles = data['candles'] as List?;
     if (candles != null && candles.isNotEmpty) {
       final candlesJson = _candlesToJson(candles);
       _controller.runJavaScript('setChartData($candlesJson);');
-
+      
       if (!_hasReceivedData) {
         _hasReceivedData = true;
         setState(() => _isLoading = false);
@@ -225,14 +349,14 @@ class _ChartScreenState extends State<ChartScreen> {
   void _handlePositionTap(String ticketStr) {
     final ticket = int.tryParse(ticketStr);
     if (ticket == null) return;
-
+    
     final position = widget.positions.firstWhere(
       (p) => _parseInt(p['ticket']) == ticket,
       orElse: () => <String, dynamic>{},
     );
-
+    
     if (position.isEmpty) return;
-
+    
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -248,6 +372,10 @@ class _ChartScreenState extends State<ChartScreen> {
           showPLPercent: widget.showPLPercent,
           confirmBeforeClose: widget.confirmBeforeClose,
           onConfirmBeforeCloseChanged: widget.onConfirmBeforeCloseChanged,
+          symbolSuffixes: widget.symbolSuffixes,
+          lotRatios: widget.lotRatios,
+          preferredPairs: widget.preferredPairs,
+          onPlaceOrder: widget.onPlaceOrder,
         ),
       ),
     );
@@ -273,16 +401,14 @@ class _ChartScreenState extends State<ChartScreen> {
 
   List<Map<String, dynamic>> _getPositionsForSymbol() {
     return _getCurrentPositions().where((p) {
-      final symbolMatch =
-          (p['symbol']?.toString().toUpperCase() ?? '') ==
-          _currentSymbol.toUpperCase();
+      final symbolMatch = (p['symbol']?.toString().toUpperCase() ?? '') == _currentSymbol.toUpperCase();
       if (!symbolMatch) return false;
-
+      
       if (_selectedAccountIndex != null) {
         final terminalIndex = _parseInt(p['terminalIndex']);
         return terminalIndex == _selectedAccountIndex;
       }
-
+      
       return true;
     }).toList();
   }
@@ -298,10 +424,10 @@ class _ChartScreenState extends State<ChartScreen> {
   String _buildPositionLinesJs() {
     final positions = _getPositionsForSymbol();
     if (positions.isEmpty) return '';
-
+    
     final lines = StringBuffer();
     lines.writeln('positionPrices = [];');
-
+    
     for (int i = 0; i < positions.length; i++) {
       final pos = positions[i];
       final type = (pos['type']?.toString() ?? '').toLowerCase();
@@ -311,12 +437,10 @@ class _ChartScreenState extends State<ChartScreen> {
       final lots = _parseDouble(pos['lots']);
       final ticket = _parseInt(pos['ticket']);
       final isBuy = type == 'buy';
-      final entryColor = isBuy ? '#00E676' : '#FF5252';
-
-      lines.writeln(
-        'positionPrices.push({ ticket: $ticket, price: $openPrice });',
-      );
-
+      final entryColor = isBuy ? '#00D4AA' : '#FF5252';
+      
+      lines.writeln('positionPrices.push({ ticket: $ticket, price: $openPrice });');
+      
       // Entry line
       lines.writeln('''
         series.createPriceLine({
@@ -328,7 +452,7 @@ class _ChartScreenState extends State<ChartScreen> {
           title: '${isBuy ? "BUY" : "SELL"} ${lots.toStringAsFixed(2)}',
         });
       ''');
-
+      
       // SL line
       if (sl > 0) {
         lines.writeln('''
@@ -342,13 +466,13 @@ class _ChartScreenState extends State<ChartScreen> {
           });
         ''');
       }
-
+      
       // TP line
       if (tp > 0) {
         lines.writeln('''
           series.createPriceLine({
             price: $tp,
-            color: '#00E676',
+            color: '#00D4AA',
             lineWidth: 1,
             lineStyle: 2,
             axisLabelVisible: true,
@@ -357,12 +481,21 @@ class _ChartScreenState extends State<ChartScreen> {
         ''');
       }
     }
-
+    
     return lines.toString();
+  }
+
+  String _getBrokerName() {
+    if (_selectedAccountIndex == null || _selectedAccountIndex! >= widget.accounts.length) {
+      return '';
+    }
+    final account = widget.accounts[_selectedAccountIndex!];
+    return account['broker']?.toString() ?? '';
   }
 
   String _buildLightweightChartsHtml() {
     final positionLines = _buildPositionLinesJs();
+    final brokerName = _getBrokerName();
 
     return '''
 <!DOCTYPE html>
@@ -404,28 +537,137 @@ class _ChartScreenState extends State<ChartScreen> {
       border-radius: 6px;
       z-index: 10;
     }
-    #price-label {
+    #timeframe-label {
       position: absolute;
-      top: 10px;
-      right: 10px;
-      color: #00E676;
+      top: 48px;
+      left: 10px;
+      color: #fff;
       font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-      font-size: 18px;
-      font-weight: bold;
-      background: rgba(30, 30, 30, 0.8);
-      padding: 6px 12px;
-      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      background: rgba(30, 30, 30, 0.9);
+      padding: 8px 12px;
+      border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+    }
+    #timeframe-label:active {
+      background: rgba(50, 50, 50, 0.95);
+    }
+    #timeframe-dropdown {
+      position: absolute;
+      top: 88px;
+      left: 10px;
+      background: rgba(30, 30, 30, 0.95);
+      border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      z-index: 20;
+      display: none;
+      flex-direction: column;
+      min-width: 80px;
+      overflow: hidden;
+    }
+    #timeframe-dropdown.show {
+      display: flex;
+    }
+    .tf-option {
+      padding: 10px 14px;
+      color: #9CA3AF;
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+      font-size: 13px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .tf-option:hover, .tf-option:active {
+      background: rgba(255, 255, 255, 0.1);
+    }
+    .tf-option.selected {
+      color: #00D4AA;
+      font-weight: 600;
+    }
+    #spread-label {
+      position: absolute;
+      top: 48px;
+      left: 100px;
+      color: #9CA3AF;
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+      font-size: 12px;
+      font-weight: 500;
+      background: rgba(30, 30, 30, 0.9);
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
       z-index: 10;
     }
   </style>
 </head>
 <body>
   <div id="chart"></div>
-  <div id="symbol-label">$_currentSymbol</div>
-  <div id="price-label">--</div>
+  <div id="symbol-label">$_currentSymbol${brokerName.isNotEmpty ? ' <span style="font-size: 12px; color: #9CA3AF;">$brokerName</span>' : ''}</div>
+  <div id="timeframe-label" onclick="toggleTimeframeDropdown(event)">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#00D4AA" stroke-width="2">
+      <circle cx="12" cy="12" r="10"></circle>
+      <polyline points="12 6 12 12 16 14"></polyline>
+    </svg>
+    <span id="tf-current">${_getTimeframeLabel()}</span>
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" stroke-width="2" id="tf-chevron">
+      <polyline points="6 9 12 15 18 9"></polyline>
+    </svg>
+  </div>
+  <div id="timeframe-dropdown">
+    ${_buildTimeframeOptionsHtml()}
+  </div>
+  <div id="spread-label">${_currentSpread != null ? 'Spread: $_currentSpread' : ''}</div>
   <div id="loading">Loading chart data...</div>
   
   <script>
+    let dropdownOpen = false;
+    
+    function toggleTimeframeDropdown(event) {
+      event.stopPropagation();
+      const dropdown = document.getElementById('timeframe-dropdown');
+      const chevron = document.getElementById('tf-chevron');
+      dropdownOpen = !dropdownOpen;
+      if (dropdownOpen) {
+        dropdown.classList.add('show');
+        chevron.style.transform = 'rotate(180deg)';
+      } else {
+        dropdown.classList.remove('show');
+        chevron.style.transform = 'rotate(0deg)';
+      }
+    }
+    
+    function selectTimeframe(value, label) {
+      document.getElementById('tf-current').textContent = label;
+      document.getElementById('timeframe-dropdown').classList.remove('show');
+      document.getElementById('tf-chevron').style.transform = 'rotate(0deg)';
+      dropdownOpen = false;
+      
+      // Update selected state
+      document.querySelectorAll('.tf-option').forEach(el => {
+        el.classList.remove('selected');
+        if (el.dataset.value === value) el.classList.add('selected');
+      });
+      
+      // Notify Flutter
+      if (window.TimeframeSelect) {
+        window.TimeframeSelect.postMessage(value);
+      }
+    }
+    
+    // Close dropdown when clicking elsewhere
+    document.addEventListener('click', function(e) {
+      if (dropdownOpen && !e.target.closest('#timeframe-label') && !e.target.closest('#timeframe-dropdown')) {
+        document.getElementById('timeframe-dropdown').classList.remove('show');
+        document.getElementById('tf-chevron').style.transform = 'rotate(0deg)';
+        dropdownOpen = false;
+      }
+    });
+    
     function onPositionTap(ticket) {
       if (window.PositionTap) {
         window.PositionTap.postMessage(ticket.toString());
@@ -462,12 +704,12 @@ class _ChartScreenState extends State<ChartScreen> {
     });
 
     const series = chart.addCandlestickSeries({
-      upColor: '#00E676',
+      upColor: '#00D4AA',
       downColor: '#FF5252',
       borderDownColor: '#FF5252',
-      borderUpColor: '#00E676',
+      borderUpColor: '#00D4AA',
       wickDownColor: '#FF5252',
-      wickUpColor: '#00E676',
+      wickUpColor: '#00D4AA',
     });
 
     // Touch handler for position lines
@@ -522,13 +764,34 @@ class _ChartScreenState extends State<ChartScreen> {
       chart.applyOptions({ width: window.innerWidth, height: window.innerHeight });
     });
 
-    const priceLabel = document.getElementById('price-label');
     let priceLines = [];  // Track price lines to clear them
     let chartInitialized = false;  // Only setData once
+    let priceDecimals = 5;  // Default, will be detected from data
+    
+    // Detect decimals from a price value
+    function detectDecimals(price) {
+      const str = price.toString();
+      const dotIndex = str.indexOf('.');
+      if (dotIndex === -1) return 0;
+      return str.length - dotIndex - 1;
+    }
     
     // Function to set initial chart data (called once)
     function setChartData(candles) {
       if (!candles || candles.length === 0) return;
+      
+      // Detect decimals from first candle's close price
+      if (candles.length > 0) {
+        priceDecimals = detectDecimals(candles[0].close);
+        // Configure price scale precision
+        series.applyOptions({
+          priceFormat: {
+            type: 'price',
+            precision: priceDecimals,
+            minMove: Math.pow(10, -priceDecimals),
+          },
+        });
+      }
       
       if (!chartInitialized) {
         // First time - set all data and position lines
@@ -548,21 +811,78 @@ class _ChartScreenState extends State<ChartScreen> {
       
       const lastCandle = candles[candles.length - 1];
       lastPrice = lastCandle.close;
-      updatePriceLabel(lastCandle.close, lastCandle.open);
     }
     
     // Function to update current candle
     function updateCandle(candle) {
       series.update(candle);
       lastPrice = candle.close;
-      updatePriceLabel(candle.close, candle.open);
     }
     
-    // Function to update price label
-    function updatePriceLabel(close, open) {
-      const decimals = close > 10 ? 2 : (close > 1 ? 4 : 5);
-      priceLabel.textContent = close.toFixed(decimals);
-      priceLabel.style.color = close >= open ? '#00E676' : '#FF5252';
+    // Function to update spread display
+    function updateSpread(spread) {
+      const spreadLabel = document.getElementById('spread-label');
+      if (spreadLabel && spread !== null && spread !== undefined) {
+        spreadLabel.textContent = 'Spread: ' + Math.round(spread);
+      }
+    }
+    
+    // Bid/Ask price lines
+    let bidLine = null;
+    let askLine = null;
+    
+    function updateBidAskLines(bid, ask) {
+      // Remove existing lines
+      if (bidLine) {
+        series.removePriceLine(bidLine);
+        bidLine = null;
+      }
+      if (askLine) {
+        series.removePriceLine(askLine);
+        askLine = null;
+      }
+      
+      // Hide the last price line on the series
+      series.applyOptions({
+        lastValueVisible: false,
+        priceLineVisible: false,
+      });
+      
+      // Add new lines without text labels but with price labels
+      bidLine = series.createPriceLine({
+        price: bid,
+        color: '#FF5252',
+        lineWidth: 1,
+        lineStyle: 2, // Dashed
+        axisLabelVisible: true,
+        title: '',
+      });
+      
+      askLine = series.createPriceLine({
+        price: ask,
+        color: '#00D4AA',
+        lineWidth: 1,
+        lineStyle: 2, // Dashed
+        axisLabelVisible: true,
+        title: '',
+      });
+    }
+    
+    function removeBidAskLines() {
+      if (bidLine) {
+        series.removePriceLine(bidLine);
+        bidLine = null;
+      }
+      if (askLine) {
+        series.removePriceLine(askLine);
+        askLine = null;
+      }
+      
+      // Show the last price line again
+      series.applyOptions({
+        lastValueVisible: true,
+        priceLineVisible: true,
+      });
     }
     
     // Show loading state
@@ -581,18 +901,106 @@ class _ChartScreenState extends State<ChartScreen> {
   }
 
   void _loadChart() {
-    _stopChartPolling();
-
+    // Close search overlay and unfocus
+    _symbolFocusNode.unfocus();
     setState(() {
-      _currentSymbol = _symbolController.text.trim().toUpperCase();
+      _showSearchOverlay = false;
+    });
+    
+    // Unsubscribe from current chart before switching
+    _unsubscribeFromChart();
+    _stopChartPolling();
+    
+    final symbol = _symbolController.text.trim().toUpperCase();
+    
+    // Add to recent searches if not empty
+    if (symbol.isNotEmpty) {
+      _addToRecentSearches(symbol);
+    }
+    
+    setState(() {
+      _currentSymbol = symbol;
       _isLoading = true;
       _hasReceivedData = false;
+      _currentSpread = null;
+      _currentBid = null;
+      _currentAsk = null;
     });
-
+    
+    _savePreferences();
     _controller.loadHtmlString(_buildLightweightChartsHtml());
   }
+  
+  void _onFocusChange() {
+    if (_symbolFocusNode.hasFocus) {
+      setState(() {
+        _showSearchOverlay = true;
+      });
+    }
+  }
+  
+  void _closeSearchOverlay() {
+    _symbolFocusNode.unfocus();
+    setState(() {
+      _showSearchOverlay = false;
+    });
+  }
+  
+  void _selectSymbol(String symbol) {
+    _symbolController.text = symbol;
+    _loadChart();
+  }
+  
+  void _toggleBidAskLines() {
+    setState(() {
+      _showBidAskLines = !_showBidAskLines;
+    });
+    
+    if (_showBidAskLines && _currentBid != null && _currentAsk != null) {
+      _controller.runJavaScript('updateBidAskLines($_currentBid, $_currentAsk);');
+    } else {
+      _controller.runJavaScript('removeBidAskLines();');
+    }
+  }
+  
+  void _openNewOrder(String orderType) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => NewOrderScreen(
+          accounts: widget.accounts,
+          accountNames: widget.accountNames,
+          mainAccountNum: widget.mainAccountNum,
+          lotRatios: widget.lotRatios,
+          preferredPairs: widget.preferredPairs,
+          symbolSuffixes: widget.symbolSuffixes,
+          initialSymbol: _currentSymbol,
+          initialOrderType: orderType,
+          onPlaceOrder: widget.onPlaceOrder,
+        ),
+      ),
+    );
+  }
+  
+  Future<void> _addToRecentSearches(String symbol) async {
+    _recentSearches.remove(symbol); // Remove if exists
+    _recentSearches.insert(0, symbol); // Add to front
+    if (_recentSearches.length > 10) {
+      _recentSearches = _recentSearches.sublist(0, 10); // Keep max 10
+    }
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList('chart_recent_searches', _recentSearches);
+  }
+  
+  Future<void> _clearRecentSearches() async {
+    setState(() {
+      _recentSearches = [];
+    });
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('chart_recent_searches');
+  }
 
-  Set<String> _getUniqueSymbols() {
+  List<String> _getUniqueSymbols() {
     final symbols = <String>{};
     final positions = _getPositionsForAccount();
     for (final pos in positions) {
@@ -601,24 +1009,115 @@ class _ChartScreenState extends State<ChartScreen> {
         symbols.add(symbol);
       }
     }
-    return symbols;
+    // Return sorted alphabetically
+    return symbols.toList()..sort();
   }
 
   int _getPositionCountForSymbol(String symbol) {
-    return _getPositionsForAccount()
-        .where(
-          (p) =>
-              (p['symbol']?.toString().toUpperCase() ?? '') ==
-              symbol.toUpperCase(),
-        )
-        .length;
+    return _getPositionsForAccount().where((p) => 
+      (p['symbol']?.toString().toUpperCase() ?? '') == symbol.toUpperCase()
+    ).length;
+  }
+
+  String _getSelectedAccountName() {
+    if (_selectedAccountIndex == null || _selectedAccountIndex! >= widget.accounts.length) {
+      return 'Account';
+    }
+    final account = widget.accounts[_selectedAccountIndex!];
+    final accountNum = account['account']?.toString() ?? '';
+    return widget.accountNames[accountNum] ?? accountNum;
+  }
+
+  String _getTimeframeLabel() {
+    return _timeframes.firstWhere((tf) => tf['value'] == _currentInterval)['label']!;
+  }
+
+  String _buildTimeframeOptionsHtml() {
+    final buffer = StringBuffer();
+    for (final tf in _timeframes) {
+      final isSelected = tf['value'] == _currentInterval;
+      buffer.writeln('''
+        <div class="tf-option${isSelected ? ' selected' : ''}" 
+             data-value="${tf['value']}" 
+             onclick="selectTimeframe('${tf['value']}', '${tf['label']}')">${tf['label']}</div>
+      ''');
+    }
+    return buffer.toString();
+  }
+
+  Widget _buildPopupMenuButton<T>({
+    required String value,
+    IconData? icon,
+    int badge = 0,
+    required List<PopupMenuItem<T>> items,
+    required void Function(T) onSelected,
+  }) {
+    return PopupMenuButton<T>(
+      onSelected: onSelected,
+      color: AppColors.surface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      offset: const Offset(0, 40),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (icon != null) ...[
+              Icon(icon, color: AppColors.primary, size: 16),
+              const SizedBox(width: 6),
+            ],
+            Expanded(
+              child: Text(
+                value,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            if (badge > 0) ...[
+              const SizedBox(width: 4),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                decoration: BoxDecoration(
+                  color: AppColors.primary,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  '$badge',
+                  style: const TextStyle(
+                    color: Colors.black,
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+            const SizedBox(width: 4),
+            const Icon(Icons.keyboard_arrow_down, color: AppColors.textSecondary, size: 18),
+          ],
+        ),
+      ),
+      itemBuilder: (context) => items,
+    );
   }
 
   @override
   void dispose() {
+    // IMPORTANT: Unsubscribe from chart updates on MT4 side
+    _unsubscribeFromChart();
     _stopChartPolling();
     _chartDataSubscription?.cancel();
+    _symbolFocusNode.removeListener(_onFocusChange);
     _symbolController.dispose();
+    _symbolFocusNode.dispose();
     super.dispose();
   }
 
@@ -640,27 +1139,25 @@ class _ChartScreenState extends State<ChartScreen> {
             title: Row(
               children: [
                 Expanded(
-                  child: SizedBox(
+                  child: Container(
                     height: 38,
+                    decoration: BoxDecoration(
+                      color: AppColors.surface,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: AppColors.primary, width: 1),
+                    ),
+                    alignment: Alignment.center,
                     child: TextField(
                       controller: _symbolController,
-                      style: const TextStyle(color: Colors.white, fontSize: 15),
+                      focusNode: _symbolFocusNode,
+                      style: const TextStyle(color: Colors.white, fontSize: 15, height: 1),
                       textCapitalization: TextCapitalization.characters,
-                      decoration: InputDecoration(
+                      textAlignVertical: TextAlignVertical.center,
+                      decoration: const InputDecoration(
                         hintText: 'Symbol',
-                        hintStyle: TextStyle(
-                          color: AppColors.textSecondary.withOpacity(0.5),
-                        ),
-                        filled: true,
-                        fillColor: AppColors.surface,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide: BorderSide.none,
-                        ),
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 0,
-                        ),
+                        hintStyle: TextStyle(color: AppColors.textSecondary, height: 1),
+                        border: InputBorder.none,
+                        contentPadding: EdgeInsets.symmetric(horizontal: 12),
                         isDense: true,
                       ),
                       onSubmitted: (_) => _loadChart(),
@@ -668,246 +1165,119 @@ class _ChartScreenState extends State<ChartScreen> {
                   ),
                 ),
                 const SizedBox(width: 8),
-                SizedBox(
-                  height: 38,
-                  child: ElevatedButton(
-                    onPressed: _loadChart,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.primary,
-                      foregroundColor: Colors.black,
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
+                GestureDetector(
+                  onTap: () {
+                    FocusScope.of(context).unfocus();
+                    _loadChart();
+                  },
+                  child: Container(
+                    height: 38,
+                    width: 38,
+                    decoration: BoxDecoration(
+                      color: AppColors.surface,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: AppColors.primary, width: 1),
                     ),
-                    child: const Text(
-                      'GO',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
+                    child: const Icon(Icons.search, color: AppColors.primary, size: 20),
                   ),
                 ),
               ],
             ),
           ),
-          body: SafeArea(
-            top: false,
-            child: Column(
-              children: [
-                // Account selector row
-                if (widget.accounts.isNotEmpty)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 8,
-                    ),
-                    color: AppColors.surface,
-                    child: SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
+          body: Stack(
+            children: [
+              SafeArea(
+                top: false,
+                child: Column(
+                  children: [
+                    // Dropdown selectors row: Account | Symbol
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      color: AppColors.background,
                       child: Row(
                         children: [
-                          ...List.generate(widget.accounts.length, (index) {
-                            final account = widget.accounts[index];
-                            final accountNum =
-                                account['account']?.toString() ?? '';
-                            final accountName =
-                                widget.accountNames[accountNum] ?? accountNum;
-                            final isSelected = _selectedAccountIndex == index;
-
-                            return Padding(
-                              padding: const EdgeInsets.only(right: 6),
-                              child: GestureDetector(
-                                onTap: () {
-                                  setState(() {
-                                    _selectedAccountIndex = index;
-                                  });
-                                  _loadChart();
-                                },
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 10,
-                                    vertical: 6,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: isSelected
-                                        ? AppColors.primaryWithOpacity(0.2)
-                                        : AppColors.background,
-                                    borderRadius: BorderRadius.circular(6),
-                                    border: Border.all(
-                                      color: isSelected
-                                          ? AppColors.primary
-                                          : AppColors.border,
-                                    ),
-                                  ),
-                                  child: Text(
-                                    accountName,
-                                    style: TextStyle(
-                                      color: isSelected
-                                          ? AppColors.primary
-                                          : AppColors.textSecondary,
-                                      fontSize: 12,
-                                      fontWeight: isSelected
-                                          ? FontWeight.bold
-                                          : FontWeight.normal,
-                                    ),
+                          // Account dropdown
+                          if (widget.accounts.isNotEmpty)
+                            Expanded(
+                              child: _buildPopupMenuButton(
+                                value: _getSelectedAccountName(),
+                                items: List.generate(widget.accounts.length, (index) {
+                                  final account = widget.accounts[index];
+                                  final accountNum = account['account']?.toString() ?? '';
+                                  final accountName = widget.accountNames[accountNum] ?? accountNum;
+                                  final isSelected = _selectedAccountIndex == index;
+                                  return PopupMenuItem<int>(
+                                    value: index,
+                                child: Text(
+                                  accountName,
+                                  style: TextStyle(
+                                    color: isSelected ? AppColors.primary : Colors.white,
+                                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                                   ),
                                 ),
-                              ),
-                            );
-                          }),
-                        ],
-                      ),
-                    ),
-                  ),
-
-                // Timeframe selector row
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 6,
-                  ),
-                  color: AppColors.surface,
-                  child: SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
-                      children: _timeframes.map((tf) {
-                        final isSelected = tf['value'] == _currentInterval;
-                        return Padding(
-                          padding: const EdgeInsets.only(right: 6),
-                          child: GestureDetector(
-                            onTap: () {
+                              );
+                            }),
+                            onSelected: (value) {
                               setState(() {
-                                _currentInterval = tf['value']!;
+                                _selectedAccountIndex = value;
                               });
                               _loadChart();
                             },
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 6,
-                              ),
-                              decoration: BoxDecoration(
-                                color: isSelected
-                                    ? AppColors.primary
-                                    : AppColors.background,
-                                borderRadius: BorderRadius.circular(6),
-                                border: Border.all(
-                                  color: isSelected
-                                      ? AppColors.primary
-                                      : AppColors.border,
-                                ),
-                              ),
-                              child: Text(
-                                tf['label']!,
-                                style: TextStyle(
-                                  color: isSelected
-                                      ? Colors.black
-                                      : AppColors.textSecondary,
-                                  fontSize: 12,
-                                  fontWeight: isSelected
-                                      ? FontWeight.bold
-                                      : FontWeight.normal,
-                                ),
-                              ),
-                            ),
                           ),
-                        );
-                      }).toList(),
-                    ),
-                  ),
-                ),
-
-                // Quick symbol buttons from open positions
-                if (uniqueSymbols.isNotEmpty)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 8,
-                    ),
-                    color: AppColors.background,
-                    child: SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Row(
-                        children: uniqueSymbols.map((symbol) {
-                          final isSelected =
-                              symbol.toUpperCase() ==
-                              _currentSymbol.toUpperCase();
-                          final posCount = _getPositionCountForSymbol(symbol);
-                          return Padding(
-                            padding: const EdgeInsets.only(right: 6),
-                            child: GestureDetector(
-                              onTap: () {
-                                _symbolController.text = symbol;
-                                _loadChart();
-                              },
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 6,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: isSelected
-                                      ? AppColors.primaryWithOpacity(0.2)
-                                      : AppColors.surface,
-                                  borderRadius: BorderRadius.circular(6),
-                                  border: Border.all(
-                                    color: isSelected
-                                        ? AppColors.primary
-                                        : AppColors.border,
-                                  ),
-                                ),
+                        ),
+                      if (widget.accounts.isNotEmpty)
+                        const SizedBox(width: 8),
+                      // Symbol dropdown
+                      if (uniqueSymbols.isNotEmpty)
+                        Expanded(
+                          child: _buildPopupMenuButton(
+                            value: _currentSymbol,
+                            badge: _getPositionCountForSymbol(_currentSymbol),
+                            items: uniqueSymbols.map((symbol) {
+                              final isSelected = symbol.toUpperCase() == _currentSymbol.toUpperCase();
+                              final posCount = _getPositionCountForSymbol(symbol);
+                              return PopupMenuItem<String>(
+                                value: symbol,
                                 child: Row(
-                                  mainAxisSize: MainAxisSize.min,
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                   children: [
                                     Text(
                                       symbol,
                                       style: TextStyle(
-                                        color: isSelected
-                                            ? AppColors.primary
-                                            : AppColors.textSecondary,
-                                        fontSize: 12,
-                                        fontWeight: isSelected
-                                            ? FontWeight.bold
-                                            : FontWeight.normal,
+                                        color: isSelected ? AppColors.primary : Colors.white,
+                                        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                                       ),
                                     ),
-                                    if (posCount > 0) ...[
-                                      const SizedBox(width: 4),
+                                    if (posCount > 0)
                                       Container(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 4,
-                                          vertical: 1,
-                                        ),
+                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                         decoration: BoxDecoration(
-                                          color: isSelected
-                                              ? AppColors.primary
-                                              : AppColors.textMuted,
-                                          borderRadius: BorderRadius.circular(
-                                            4,
-                                          ),
+                                          color: AppColors.primary.withOpacity(0.2),
+                                          borderRadius: BorderRadius.circular(10),
                                         ),
                                         child: Text(
                                           '$posCount',
-                                          style: TextStyle(
-                                            color: isSelected
-                                                ? Colors.black
-                                                : AppColors.surface,
-                                            fontSize: 9,
+                                          style: const TextStyle(
+                                            color: AppColors.primary,
+                                            fontSize: 11,
                                             fontWeight: FontWeight.bold,
                                           ),
                                         ),
                                       ),
-                                    ],
                                   ],
                                 ),
-                              ),
-                            ),
-                          );
-                        }).toList(),
-                      ),
-                    ),
+                              );
+                            }).toList(),
+                            onSelected: (value) {
+                              _selectSymbol(value);
+                            },
+                          ),
+                        ),
+                    ],
                   ),
-
-                // Chart
+                ),
+                
+                // Chart with buy/sell buttons overlay
                 Expanded(
                   child: Stack(
                     children: [
@@ -916,9 +1286,104 @@ class _ChartScreenState extends State<ChartScreen> {
                         Container(
                           color: AppColors.background,
                           child: const Center(
-                            child: CircularProgressIndicator(
-                              color: AppColors.primary,
+                            child: CircularProgressIndicator(color: AppColors.primary),
+                          ),
+                        ),
+                      // B/A toggle - top right, in line with symbol label
+                      Positioned(
+                        top: 10,
+                        right: 10,
+                        child: GestureDetector(
+                          onTap: _toggleBidAskLines,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: _showBidAskLines 
+                                  ? AppColors.primary.withOpacity(0.2) 
+                                  : const Color(0xFF1E1E1E).withOpacity(0.9),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: _showBidAskLines 
+                                    ? AppColors.primary 
+                                    : Colors.white.withOpacity(0.1),
+                              ),
                             ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  _showBidAskLines ? Icons.check_box : Icons.check_box_outline_blank,
+                                  color: _showBidAskLines ? AppColors.primary : const Color(0xFF9CA3AF),
+                                  size: 16,
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  'B/A',
+                                  style: TextStyle(
+                                    color: _showBidAskLines ? AppColors.primary : const Color(0xFF9CA3AF),
+                                    fontSize: 12,
+                                    fontWeight: _showBidAskLines ? FontWeight.bold : FontWeight.w500,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      // Buy/Sell buttons at bottom (hidden when keyboard is open)
+                      if (MediaQuery.of(context).viewInsets.bottom == 0)
+                        Positioned(
+                          left: 16,
+                          right: 16,
+                          bottom: 36,
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: GestureDetector(
+                                  onTap: () => _openNewOrder('buy'),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(vertical: 12),
+                                    decoration: BoxDecoration(
+                                      color: AppColors.primary,
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: const Center(
+                                      child: Text(
+                                        'BUY',
+                                        style: TextStyle(
+                                          color: Colors.black,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 14,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: GestureDetector(
+                                  onTap: () => _openNewOrder('sell'),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(vertical: 12),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFFF5252),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: const Center(
+                                      child: Text(
+                                        'SELL',
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 14,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                     ],
@@ -927,8 +1392,152 @@ class _ChartScreenState extends State<ChartScreen> {
               ],
             ),
           ),
+          
+          // Search overlay
+          if (_showSearchOverlay)
+            _buildSearchOverlay(),
+            ],
+          ),
         );
       },
+    );
+  }
+  
+  Widget _buildSearchOverlay() {
+    final brokerName = _getBrokerName();
+    
+    return GestureDetector(
+      onTap: _closeSearchOverlay,
+      child: Container(
+        color: Colors.black.withOpacity(0.85),
+        child: SafeArea(
+          top: false,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Header with broker and close button
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    if (brokerName.isNotEmpty)
+                      Text(
+                        brokerName,
+                        style: const TextStyle(
+                          color: AppColors.textSecondary,
+                          fontSize: 14,
+                        ),
+                      ),
+                    const Spacer(),
+                    IconButton(
+                      onPressed: _closeSearchOverlay,
+                      icon: const Icon(Icons.close, color: AppColors.textSecondary),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                    ),
+                  ],
+                ),
+              ),
+              
+              // Recent searches
+              if (_recentSearches.isNotEmpty) ...[
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'RECENT',
+                        style: TextStyle(
+                          color: AppColors.textSecondary,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 1,
+                        ),
+                      ),
+                      GestureDetector(
+                        onTap: _clearRecentSearches,
+                        child: const Text(
+                          'Clear',
+                          style: TextStyle(
+                            color: AppColors.primary,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: _recentSearches.map((symbol) {
+                      return GestureDetector(
+                        onTap: () => _selectSymbol(symbol),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: AppColors.surface,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: AppColors.border),
+                          ),
+                          child: Text(
+                            symbol,
+                            style: const TextStyle(color: Colors.white, fontSize: 13),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ],
+              
+              // Preferred symbols
+              const Padding(
+                padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
+                child: Text(
+                  'POPULAR',
+                  style: TextStyle(
+                    color: AppColors.textSecondary,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 1,
+                  ),
+                ),
+              ),
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: _preferredSymbols.map((symbol) {
+                      return GestureDetector(
+                        onTap: () => _selectSymbol(symbol),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: AppColors.surface,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: AppColors.border),
+                          ),
+                          child: Text(
+                            symbol,
+                            style: const TextStyle(color: Colors.white, fontSize: 13),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
