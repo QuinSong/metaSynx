@@ -220,8 +220,18 @@ void WritePositions()
          double currentPrice = 0;
          if(!isPending)
          {
+            // Market orders: bid for buy (close price), ask for sell
             currentPrice = orderType == OP_BUY ? 
                MarketInfo(OrderSymbol(), MODE_BID) : MarketInfo(OrderSymbol(), MODE_ASK);
+         }
+         else
+         {
+            // Pending orders: get current market price for reference
+            // Buy limit/stop would execute at ask, sell limit/stop at bid
+            if(orderType == OP_BUYLIMIT || orderType == OP_BUYSTOP)
+               currentPrice = MarketInfo(OrderSymbol(), MODE_ASK);
+            else
+               currentPrice = MarketInfo(OrderSymbol(), MODE_BID);
          }
          
          json += "{";
@@ -422,6 +432,19 @@ void ProcessCommand(string jsonCommand)
       double tp = StringToDouble(ExtractJsonString(jsonCommand, "tp"));
       Print("MODIFY COMMAND: ticket=", ticket, " sl=", sl, " tp=", tp);
       ModifyPosition(ticket, sl, tp);
+   }
+   else if(action == "cancel_order")
+   {
+      int ticket = (int)StringToInteger(ExtractJsonString(jsonCommand, "ticket"));
+      Print("CANCEL ORDER COMMAND: ticket=", ticket);
+      CancelPendingOrder(ticket);
+   }
+   else if(action == "modify_pending")
+   {
+      int ticket = (int)StringToInteger(ExtractJsonString(jsonCommand, "ticket"));
+      double price = StringToDouble(ExtractJsonString(jsonCommand, "price"));
+      Print("MODIFY PENDING COMMAND: ticket=", ticket, " price=", price);
+      ModifyPendingOrder(ticket, price);
    }
    else if(action == "get_chart_data")
    {
@@ -708,6 +731,95 @@ void ModifyPosition(int ticket, double sl, double tp)
       int err = GetLastError();
       if(err == 1) { WriteResponse(true, "No change needed", ticket); }
       else { Print("MODIFY FAILED: ", ticket, " error=", err); WriteResponse(false, "Error " + IntegerToString(err), ticket); }
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Cancel pending order                                               |
+//+------------------------------------------------------------------+
+void CancelPendingOrder(int ticket)
+{
+   if(!OrderSelect(ticket, SELECT_BY_TICKET))
+   {
+      Print("CANCEL FAILED: Ticket not found: ", ticket);
+      WriteResponse(false, "Ticket not found", ticket);
+      return;
+   }
+   
+   if(OrderCloseTime() != 0)
+   {
+      Print("CANCEL FAILED: Already closed/cancelled: ", ticket);
+      WriteResponse(false, "Already closed", ticket);
+      return;
+   }
+   
+   int orderType = OrderType();
+   if(orderType < OP_BUYLIMIT)
+   {
+      Print("CANCEL FAILED: Not a pending order: ", ticket);
+      WriteResponse(false, "Not a pending order", ticket);
+      return;
+   }
+   
+   bool result = OrderDelete(ticket, clrRed);
+   
+   if(result)
+   {
+      Print("CANCEL SUCCESS: ", ticket);
+      WriteResponse(true, "Order cancelled", ticket);
+   }
+   else
+   {
+      int err = GetLastError();
+      Print("CANCEL FAILED: ", ticket, " error=", err);
+      WriteResponse(false, "Error " + IntegerToString(err), ticket);
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Modify pending order price                                         |
+//+------------------------------------------------------------------+
+void ModifyPendingOrder(int ticket, double newPrice)
+{
+   if(!OrderSelect(ticket, SELECT_BY_TICKET))
+   {
+      Print("MODIFY PENDING FAILED: Ticket not found: ", ticket);
+      WriteResponse(false, "Ticket not found", ticket);
+      return;
+   }
+   
+   if(OrderCloseTime() != 0)
+   {
+      Print("MODIFY PENDING FAILED: Already closed: ", ticket);
+      WriteResponse(false, "Already closed", ticket);
+      return;
+   }
+   
+   int orderType = OrderType();
+   if(orderType < OP_BUYLIMIT)
+   {
+      Print("MODIFY PENDING FAILED: Not a pending order: ", ticket);
+      WriteResponse(false, "Not a pending order", ticket);
+      return;
+   }
+   
+   int digits = (int)MarketInfo(OrderSymbol(), MODE_DIGITS);
+   newPrice = NormalizeDouble(newPrice, digits);
+   
+   Print("MODIFY PENDING: ticket=", ticket, " newPrice=", newPrice);
+   
+   bool result = OrderModify(ticket, newPrice, OrderStopLoss(), OrderTakeProfit(), 0, clrBlue);
+   
+   if(result)
+   {
+      Print("MODIFY PENDING SUCCESS: ", ticket);
+      WriteResponse(true, "Order modified", ticket);
+   }
+   else
+   {
+      int err = GetLastError();
+      if(err == 1) { WriteResponse(true, "No change needed", ticket); }
+      else { Print("MODIFY PENDING FAILED: ", ticket, " error=", err); WriteResponse(false, "Error " + IntegerToString(err), ticket); }
    }
 }
 

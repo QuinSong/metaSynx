@@ -2,7 +2,7 @@ import os
 import time
 
 
-msg = 'limit/stop orders attempt 1'
+msg = 'limit/stop orders update 1'
 
 
 os.system('git add .')

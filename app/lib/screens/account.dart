@@ -11,6 +11,8 @@ class AccountDetailScreen extends StatefulWidget {
   final ValueNotifier<List<Map<String, dynamic>>> positionsNotifier;
   final void Function(int ticket, int terminalIndex) onClosePosition;
   final void Function(int ticket, int terminalIndex, double? sl, double? tp) onModifyPosition;
+  final void Function(int ticket, int terminalIndex) onCancelOrder;
+  final void Function(int ticket, int terminalIndex, double price) onModifyPendingOrder;
   final Map<String, String> accountNames;
   final String? mainAccountNum;
   final bool includeCommissionSwap;
@@ -43,6 +45,8 @@ class AccountDetailScreen extends StatefulWidget {
     required this.positionsNotifier,
     required this.onClosePosition,
     required this.onModifyPosition,
+    required this.onCancelOrder,
+    required this.onModifyPendingOrder,
     required this.accountNames,
     this.mainAccountNum,
     required this.includeCommissionSwap,
@@ -201,8 +205,20 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
         .toList();
   }
 
+  List<Map<String, dynamic>> _getPendingOrders() {
+    return _getAllPositionsForAccount()
+        .where((p) => p['isPending'] == true)
+        .toList();
+  }
+
+  List<Map<String, dynamic>> _getMarketPositions() {
+    return _getAllPositionsForAccount()
+        .where((p) => p['isPending'] != true)
+        .toList();
+  }
+
   List<Map<String, dynamic>> _getFilteredPositions() {
-    final positions = _getAllPositionsForAccount()
+    final positions = _getMarketPositions()
         .where((p) => _selectedPairs.contains(p['symbol'] as String? ?? ''))
         .toList();
     
@@ -223,8 +239,13 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
     return positions;
   }
 
+  String _formatOrderType(String type) {
+    // Convert buy_limit to BUY LIMIT, sell_stop to SELL STOP, etc.
+    return type.toUpperCase().replaceAll('_', ' ');
+  }
+
   Map<String, int> _getPairCounts() {
-    final positions = _getAllPositionsForAccount();
+    final positions = _getMarketPositions();
     final counts = <String, int>{};
     for (final pos in positions) {
       final symbol = pos['symbol'] as String? ?? '';
@@ -271,15 +292,20 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
             return ValueListenableBuilder<List<Map<String, dynamic>>>(
               valueListenable: widget.positionsNotifier,
               builder: (context, _, __) {
-                final allPositions = _getAllPositionsForAccount();
+                final allPositions = _getMarketPositions();
                 final filteredPositions = _getFilteredPositions();
                 final pairCounts = _getPairCounts();
+                final pendingOrders = _getPendingOrders();
                 return SingleChildScrollView(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       _buildAccountInfoCard(account),
+                      if (pendingOrders.isNotEmpty) ...[
+                        const SizedBox(height: 24),
+                        _buildPendingOrdersSection(pendingOrders),
+                      ],
                       const SizedBox(height: 24),
                       _buildPositionsSection(allPositions, filteredPositions, pairCounts),
                     ],
@@ -457,6 +483,279 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
     );
   }
 
+  Widget _buildPendingOrdersSection(List<Map<String, dynamic>> pendingOrders) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'ORDERS (${pendingOrders.length})',
+          style: AppTextStyles.label,
+        ),
+        const SizedBox(height: 12),
+        ...pendingOrders.map((order) => _buildPendingOrderCard(order)),
+      ],
+    );
+  }
+
+  Widget _buildPendingOrderCard(Map<String, dynamic> order) {
+    final symbol = order['symbol'] as String? ?? '';
+    final type = order['type'] as String? ?? '';
+    final lots = (order['lots'] as num?)?.toDouble() ?? 0;
+    final openPrice = (order['openPrice'] as num?)?.toDouble() ?? 0;
+    final currentPrice = (order['currentPrice'] as num?)?.toDouble() ?? 0;
+    final ticket = order['ticket'] as int? ?? 0;
+    final terminalIndex = order['terminalIndex'] as int? ?? 0;
+    
+    final formattedType = _formatOrderType(type);
+    final isBuy = type.toLowerCase().contains('buy');
+    final digits = _detectDigits(openPrice);
+    
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        children: [
+          // Top row: Symbol + Type badge, Lots
+          Row(
+            children: [
+              // Symbol
+              Text(
+                symbol,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(width: 8),
+              // Order type badge
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: isBuy 
+                      ? AppColors.primary.withOpacity(0.15)
+                      : AppColors.error.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  formattedType,
+                  style: TextStyle(
+                    color: isBuy ? AppColors.primary : AppColors.error,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              const Spacer(),
+              // Lots
+              Text(
+                'Lots ${lots.toStringAsFixed(2)}',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+          
+          const SizedBox(height: 10),
+          
+          // Middle row: Price info
+          Row(
+            children: [
+              // Order price
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Price',
+                    style: TextStyle(
+                      color: AppColors.textMuted,
+                      fontSize: 10,
+                    ),
+                  ),
+                  Text(
+                    openPrice.toStringAsFixed(digits),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(width: 24),
+              // Current price
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Current',
+                    style: TextStyle(
+                      color: AppColors.textMuted,
+                      fontSize: 10,
+                    ),
+                  ),
+                  Text(
+                    currentPrice.toStringAsFixed(digits),
+                    style: const TextStyle(
+                      color: AppColors.textSecondary,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+              const Spacer(),
+              // Edit button
+              GestureDetector(
+                onTap: () => _showEditPendingOrderDialog(order),
+                child: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: AppColors.primary.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(
+                    Icons.edit,
+                    color: AppColors.primary,
+                    size: 18,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              // Cancel button
+              GestureDetector(
+                onTap: () => _showCancelOrderConfirmation(ticket, terminalIndex, symbol, formattedType),
+                child: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: AppColors.error.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(
+                    Icons.close,
+                    color: AppColors.error,
+                    size: 18,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showCancelOrderConfirmation(int ticket, int terminalIndex, String symbol, String type) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: const Text('Cancel Order', style: TextStyle(color: Colors.white)),
+        content: Text(
+          'Cancel $type order on $symbol?',
+          style: const TextStyle(color: AppColors.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('No', style: TextStyle(color: AppColors.textSecondary)),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              widget.onCancelOrder(ticket, terminalIndex);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Cancelling order...'),
+                  backgroundColor: AppColors.primary,
+                ),
+              );
+            },
+            child: const Text('Yes, Cancel', style: TextStyle(color: AppColors.error)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showEditPendingOrderDialog(Map<String, dynamic> order) {
+    final ticket = order['ticket'] as int? ?? 0;
+    final terminalIndex = order['terminalIndex'] as int? ?? 0;
+    final symbol = order['symbol'] as String? ?? '';
+    final openPrice = (order['openPrice'] as num?)?.toDouble() ?? 0;
+    final digits = _detectDigits(openPrice);
+    
+    final priceController = TextEditingController(text: openPrice.toStringAsFixed(digits));
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: Text('Edit Order - $symbol', style: const TextStyle(color: Colors.white)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('New Price', style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+            const SizedBox(height: 8),
+            TextField(
+              controller: priceController,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              style: const TextStyle(color: Colors.white),
+              decoration: InputDecoration(
+                filled: true,
+                fillColor: AppColors.background,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide.none,
+                ),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+              ),
+              autofocus: true,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel', style: TextStyle(color: AppColors.textSecondary)),
+          ),
+          TextButton(
+            onPressed: () {
+              final newPrice = double.tryParse(priceController.text);
+              if (newPrice == null || newPrice <= 0) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Invalid price'),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+                return;
+              }
+              Navigator.pop(context);
+              widget.onModifyPendingOrder(ticket, terminalIndex, newPrice);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Modifying order...'),
+                  backgroundColor: AppColors.primary,
+                ),
+              );
+            },
+            child: const Text('Update', style: TextStyle(color: AppColors.primary)),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildPositionsSection(
     List<Map<String, dynamic>> allPositions,
     List<Map<String, dynamic>> filteredPositions,
@@ -627,7 +926,7 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
     final ticket = position['ticket'] as int? ?? 0;
     final openTime = position['openTime'] as String? ?? '';
 
-    final isBuy = type.toLowerCase() == 'buy';
+    final isBuy = type.toLowerCase().contains('buy');
     final displayProfit = widget.includeCommissionSwap 
         ? profit + swap + commission 
         : profit;
@@ -689,7 +988,7 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
                               borderRadius: BorderRadius.circular(4),
                             ),
                             child: Text(
-                              type.toUpperCase(),
+                              _formatOrderType(type),
                               style: const TextStyle(
                                 color: Colors.white,
                                 fontSize: 11,

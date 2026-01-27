@@ -214,6 +214,25 @@ class EAService {
     });
   }
 
+  /// Cancel a pending order
+  Future<bool> cancelOrder(int ticket, int terminalIndex) async {
+    onLog?.call('Cancelling order: ticket=$ticket');
+    return await sendCommandToTerminal(terminalIndex, {
+      'action': 'cancel_order',
+      'ticket': ticket,
+    });
+  }
+
+  /// Modify pending order price
+  Future<bool> modifyPendingOrder(int ticket, int terminalIndex, double price) async {
+    onLog?.call('Modifying pending order: ticket=$ticket, price=$price');
+    return await sendCommandToTerminal(terminalIndex, {
+      'action': 'modify_pending',
+      'ticket': ticket,
+      'price': price,
+    });
+  }
+
   /// Get chart data - sends command to EA and reads response
   /// This is fire-and-forget to avoid blocking other commands
   Future<Map<String, dynamic>?> getChartData(String symbol, String timeframe, int terminalIndex) async {

@@ -324,6 +324,23 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     });
   }
 
+  void _cancelOrder(int ticket, int terminalIndex) {
+    _connection.send({
+      'action': 'cancel_order',
+      'ticket': ticket,
+      'terminalIndex': terminalIndex,
+    });
+  }
+
+  void _modifyPendingOrder(int ticket, int terminalIndex, double price) {
+    _connection.send({
+      'action': 'modify_pending',
+      'ticket': ticket,
+      'terminalIndex': terminalIndex,
+      'price': price,
+    });
+  }
+
   void _requestChartData(String symbol, String timeframe, int terminalIndex) {
     _connection.send({
       'action': 'get_chart_data',
@@ -351,6 +368,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           positionsNotifier: _positionsNotifier,
           onClosePosition: _closePosition,
           onModifyPosition: _modifyPosition,
+          onCancelOrder: _cancelOrder,
+          onModifyPendingOrder: _modifyPendingOrder,
           accountNames: _accountNames,
           mainAccountNum: _mainAccountNum,
           includeCommissionSwap: _includeCommissionSwap,

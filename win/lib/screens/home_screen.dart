@@ -124,6 +124,14 @@ class _HomeScreenState extends State<HomeScreen> {
         _handleModifyPosition(message);
         break;
 
+      case 'cancel_order':
+        _handleCancelOrder(message);
+        break;
+
+      case 'modify_pending':
+        _handleModifyPending(message);
+        break;
+
       case 'get_chart_data':
         _handleGetChartData(message);
         break;
@@ -215,6 +223,35 @@ class _HomeScreenState extends State<HomeScreen> {
     _addLog('Modifying position: ticket=$ticket on terminal $terminalIndex, SL=$sl, TP=$tp');
     await _eaService.modifyPosition(ticket, terminalIndex, sl: sl, tp: tp);
     _addLog('Modify command sent for ticket=$ticket');
+  }
+
+  Future<void> _handleCancelOrder(Map<String, dynamic> message) async {
+    final ticket = message['ticket'] as int?;
+    final terminalIndex = message['terminalIndex'] as int?;
+    
+    if (ticket == null || terminalIndex == null) {
+      _addLog('Cancel order: missing ticket or terminalIndex');
+      return;
+    }
+    
+    _addLog('Cancelling order: ticket=$ticket on terminal $terminalIndex');
+    await _eaService.cancelOrder(ticket, terminalIndex);
+    _addLog('Cancel command sent for ticket=$ticket');
+  }
+
+  Future<void> _handleModifyPending(Map<String, dynamic> message) async {
+    final ticket = message['ticket'] as int?;
+    final terminalIndex = message['terminalIndex'] as int?;
+    final price = (message['price'] as num?)?.toDouble();
+    
+    if (ticket == null || terminalIndex == null || price == null) {
+      _addLog('Modify pending: missing ticket, terminalIndex, or price');
+      return;
+    }
+    
+    _addLog('Modifying pending order: ticket=$ticket, price=$price on terminal $terminalIndex');
+    await _eaService.modifyPendingOrder(ticket, terminalIndex, price);
+    _addLog('Modify pending command sent for ticket=$ticket');
   }
 
   void _handleGetChartData(Map<String, dynamic> message) {
