@@ -251,29 +251,12 @@ void WritePositions()
 //+------------------------------------------------------------------+
 void WriteChartData(string symbol, int timeframe, int count)
 {
-   // Safety check - ensure we have valid market data
-   double testBid = MarketInfo(symbol, MODE_BID);
-   if(testBid <= 0)
-   {
-      Print("WriteChartData: No market data for ", symbol);
-      return;
-   }
-   
    int digits = (int)MarketInfo(symbol, MODE_DIGITS);
-   double bid = testBid;
-   double ask = MarketInfo(symbol, MODE_ASK);
-   double point = MarketInfo(symbol, MODE_POINT);
-   double spread = 0;
-   if(point > 0 && bid > 0 && ask > 0) spread = (ask - bid) / point;
-   if(spread < 0 || spread > 10000) spread = 0; // Sanity check
    
    string json = "{";
    json += "\"type\":\"history\",";
    json += "\"symbol\":\"" + symbol + "\",";
    json += "\"timeframe\":" + IntegerToString(timeframe) + ",";
-   json += "\"bid\":" + DoubleToString(bid, digits) + ",";
-   json += "\"ask\":" + DoubleToString(ask, digits) + ",";
-   json += "\"spread\":" + DoubleToString(spread, 1) + ",";
    json += "\"candles\":[";
    
    int available = iBars(symbol, timeframe);
@@ -319,17 +302,7 @@ void WriteChartUpdate()
 {
    if(!g_chartSubscribed || g_chartSymbol == "") return;
    
-   // Safety check - ensure we have valid market data before proceeding
-   double testBid = MarketInfo(g_chartSymbol, MODE_BID);
-   if(testBid <= 0) return; // Symbol data not ready, skip this update
-   
    int digits = (int)MarketInfo(g_chartSymbol, MODE_DIGITS);
-   double bid = testBid;
-   double ask = MarketInfo(g_chartSymbol, MODE_ASK);
-   double point = MarketInfo(g_chartSymbol, MODE_POINT);
-   double spread = 0;
-   if(point > 0 && bid > 0 && ask > 0) spread = (ask - bid) / point;
-   if(spread < 0 || spread > 10000) spread = 0; // Sanity check
    
    datetime barTime = iTime(g_chartSymbol, g_chartTimeframe, 0);
    double open = iOpen(g_chartSymbol, g_chartTimeframe, 0);
@@ -341,9 +314,6 @@ void WriteChartUpdate()
    json += "\"type\":\"update\",";
    json += "\"symbol\":\"" + g_chartSymbol + "\",";
    json += "\"timeframe\":" + IntegerToString(g_chartTimeframe) + ",";
-   json += "\"bid\":" + DoubleToString(bid, digits) + ",";
-   json += "\"ask\":" + DoubleToString(ask, digits) + ",";
-   json += "\"spread\":" + DoubleToString(spread, 1) + ",";
    json += "\"candle\":{";
    json += "\"time\":" + IntegerToString((long)barTime) + ",";
    json += "\"open\":" + DoubleToString(open, digits) + ",";

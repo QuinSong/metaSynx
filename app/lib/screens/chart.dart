@@ -78,10 +78,6 @@ class _ChartScreenState extends State<ChartScreen> {
   final FocusNode _symbolFocusNode = FocusNode();
   Timer? _chartPollTimer;
   StreamSubscription<Map<String, dynamic>>? _chartDataSubscription;
-  int? _currentSpread;
-  double? _currentBid;
-  double? _currentAsk;
-  bool _showBidAskLines = false;
   
   // Search overlay
   bool _showSearchOverlay = false;
@@ -293,27 +289,6 @@ class _ChartScreenState extends State<ChartScreen> {
     
     if (dataSymbol != null && dataSymbol != _currentSymbol) return;
     if (dataTimeframe != null && dataTimeframe != _currentInterval) return;
-    
-    // Extract spread if available and update display
-    final spread = data['spread'];
-    if (spread != null) {
-      final spreadValue = (spread is num) ? spread.toDouble() : double.tryParse(spread.toString());
-      if (spreadValue != null) {
-        _currentSpread = spreadValue.round();
-        _controller.runJavaScript('updateSpread(${_currentSpread});');
-      }
-    }
-    
-    // Extract bid/ask for bid/ask lines
-    final bid = data['bid'];
-    final ask = data['ask'];
-    if (bid != null && ask != null) {
-      _currentBid = (bid is num) ? bid.toDouble() : double.tryParse(bid.toString());
-      _currentAsk = (ask is num) ? ask.toDouble() : double.tryParse(ask.toString());
-      if (_showBidAskLines && _currentBid != null && _currentAsk != null) {
-        _controller.runJavaScript('updateBidAskLines($_currentBid, $_currentAsk);');
-      }
-    }
     
     final candles = data['candles'] as List?;
     if (candles != null && candles.isNotEmpty) {
@@ -589,20 +564,6 @@ class _ChartScreenState extends State<ChartScreen> {
       color: #00D4AA;
       font-weight: 600;
     }
-    #spread-label {
-      position: absolute;
-      top: 48px;
-      left: 100px;
-      color: #9CA3AF;
-      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-      font-size: 12px;
-      font-weight: 500;
-      background: rgba(30, 30, 30, 0.9);
-      padding: 8px 10px;
-      border-radius: 8px;
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      z-index: 10;
-    }
   </style>
 </head>
 <body>
@@ -621,7 +582,6 @@ class _ChartScreenState extends State<ChartScreen> {
   <div id="timeframe-dropdown">
     ${_buildTimeframeOptionsHtml()}
   </div>
-  <div id="spread-label">${_currentSpread != null ? 'Spread: $_currentSpread' : ''}</div>
   <div id="loading">Loading chart data...</div>
   
   <script>
@@ -819,72 +779,6 @@ class _ChartScreenState extends State<ChartScreen> {
       lastPrice = candle.close;
     }
     
-    // Function to update spread display
-    function updateSpread(spread) {
-      const spreadLabel = document.getElementById('spread-label');
-      if (spreadLabel && spread !== null && spread !== undefined) {
-        spreadLabel.textContent = 'Spread: ' + Math.round(spread);
-      }
-    }
-    
-    // Bid/Ask price lines
-    let bidLine = null;
-    let askLine = null;
-    
-    function updateBidAskLines(bid, ask) {
-      // Remove existing lines
-      if (bidLine) {
-        series.removePriceLine(bidLine);
-        bidLine = null;
-      }
-      if (askLine) {
-        series.removePriceLine(askLine);
-        askLine = null;
-      }
-      
-      // Hide the last price line on the series
-      series.applyOptions({
-        lastValueVisible: false,
-        priceLineVisible: false,
-      });
-      
-      // Add new lines without text labels but with price labels
-      bidLine = series.createPriceLine({
-        price: bid,
-        color: '#FF5252',
-        lineWidth: 1,
-        lineStyle: 2, // Dashed
-        axisLabelVisible: true,
-        title: '',
-      });
-      
-      askLine = series.createPriceLine({
-        price: ask,
-        color: '#00D4AA',
-        lineWidth: 1,
-        lineStyle: 2, // Dashed
-        axisLabelVisible: true,
-        title: '',
-      });
-    }
-    
-    function removeBidAskLines() {
-      if (bidLine) {
-        series.removePriceLine(bidLine);
-        bidLine = null;
-      }
-      if (askLine) {
-        series.removePriceLine(askLine);
-        askLine = null;
-      }
-      
-      // Show the last price line again
-      series.applyOptions({
-        lastValueVisible: true,
-        priceLineVisible: true,
-      });
-    }
-    
     // Show loading state
     document.getElementById('loading').style.display = 'block';
     
@@ -922,9 +816,6 @@ class _ChartScreenState extends State<ChartScreen> {
       _currentSymbol = symbol;
       _isLoading = true;
       _hasReceivedData = false;
-      _currentSpread = null;
-      _currentBid = null;
-      _currentAsk = null;
     });
     
     _savePreferences();
@@ -949,18 +840,6 @@ class _ChartScreenState extends State<ChartScreen> {
   void _selectSymbol(String symbol) {
     _symbolController.text = symbol;
     _loadChart();
-  }
-  
-  void _toggleBidAskLines() {
-    setState(() {
-      _showBidAskLines = !_showBidAskLines;
-    });
-    
-    if (_showBidAskLines && _currentBid != null && _currentAsk != null) {
-      _controller.runJavaScript('updateBidAskLines($_currentBid, $_currentAsk);');
-    } else {
-      _controller.runJavaScript('removeBidAskLines();');
-    }
   }
   
   void _openNewOrder(String orderType) {
@@ -1289,47 +1168,6 @@ class _ChartScreenState extends State<ChartScreen> {
                             child: CircularProgressIndicator(color: AppColors.primary),
                           ),
                         ),
-                      // B/A toggle - top right, in line with symbol label
-                      Positioned(
-                        top: 10,
-                        right: 10,
-                        child: GestureDetector(
-                          onTap: _toggleBidAskLines,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: _showBidAskLines 
-                                  ? AppColors.primary.withOpacity(0.2) 
-                                  : const Color(0xFF1E1E1E).withOpacity(0.9),
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(
-                                color: _showBidAskLines 
-                                    ? AppColors.primary 
-                                    : Colors.white.withOpacity(0.1),
-                              ),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  _showBidAskLines ? Icons.check_box : Icons.check_box_outline_blank,
-                                  color: _showBidAskLines ? AppColors.primary : const Color(0xFF9CA3AF),
-                                  size: 16,
-                                ),
-                                const SizedBox(width: 4),
-                                Text(
-                                  'B/A',
-                                  style: TextStyle(
-                                    color: _showBidAskLines ? AppColors.primary : const Color(0xFF9CA3AF),
-                                    fontSize: 12,
-                                    fontWeight: _showBidAskLines ? FontWeight.bold : FontWeight.w500,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
                       // Buy/Sell buttons at bottom (hidden when keyboard is open)
                       if (MediaQuery.of(context).viewInsets.bottom == 0)
                         Positioned(
