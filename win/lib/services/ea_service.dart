@@ -8,8 +8,6 @@ class EAService {
   static String? _commonDataPath;
   
   Timer? _pollTimer;
-  final Map<int, Timer> _chartStreamTimers = {};
-  final Map<int, DateTime> _lastChartFileModified = {};
   
   Function(List<Map<String, dynamic>>)? onAccountsUpdated;
   Function(String)? onLog;
@@ -240,67 +238,6 @@ class EAService {
     }
   }
 
-  /// Subscribe to chart updates - tells EA to start streaming data
-  Future<void> subscribeChart(String symbol, String timeframe, int terminalIndex) async {
-    await sendCommandToTerminal(terminalIndex, {
-      'action': 'subscribe_chart',
-      'symbol': symbol,
-      'timeframe': timeframe,
-    });
-  }
-
-  /// Unsubscribe from chart updates - tells EA to stop streaming
-  Future<void> unsubscribeChart(int terminalIndex) async {
-    await sendCommandToTerminal(terminalIndex, {
-      'action': 'unsubscribe_chart',
-    });
-  }
-
-  /// Start streaming chart data to callback (polls chart file for changes)
-  void startChartStream(int terminalIndex, void Function(Map<String, dynamic>) onData) {
-    stopChartStream(terminalIndex);
-    
-    _chartStreamTimers[terminalIndex] = Timer.periodic(
-      const Duration(milliseconds: 500),
-      (_) => _checkChartUpdate(terminalIndex, onData),
-    );
-  }
-
-  /// Stop streaming chart data
-  void stopChartStream(int terminalIndex) {
-    _chartStreamTimers[terminalIndex]?.cancel();
-    _chartStreamTimers.remove(terminalIndex);
-    _lastChartFileModified.remove(terminalIndex);
-  }
-
-  /// Check for chart file updates and send to callback
-  Future<void> _checkChartUpdate(int terminalIndex, void Function(Map<String, dynamic>) onData) async {
-    if (_commonDataPath == null) return;
-    
-    final filePath = '$_commonDataPath\\Files\\$_bridgeFolder\\chart_$terminalIndex.json';
-    final file = File(filePath);
-    
-    if (!await file.exists()) return;
-    
-    try {
-      final modified = await file.lastModified();
-      final lastModified = _lastChartFileModified[terminalIndex];
-      
-      // Only read if file was modified since last check
-      if (lastModified == null || modified.isAfter(lastModified)) {
-        _lastChartFileModified[terminalIndex] = modified;
-        
-        final content = await _readFileSafe(file);
-        if (content != null && content.isNotEmpty) {
-          final data = jsonDecode(content) as Map<String, dynamic>;
-          onData(data);
-        }
-      }
-    } catch (e) {
-      // Ignore errors - file might be locked
-    }
-  }
-
   /// Poll for account status updates
   Future<void> _pollAccountStatus() async {
     final accounts = await getAccounts();
@@ -326,11 +263,5 @@ class EAService {
 
   void dispose() {
     stopPolling();
-    // Stop all chart streams
-    for (final timer in _chartStreamTimers.values) {
-      timer.cancel();
-    }
-    _chartStreamTimers.clear();
-    _lastChartFileModified.clear();
   }
 }

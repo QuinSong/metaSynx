@@ -22,8 +22,6 @@ class ChartScreen extends StatefulWidget {
   // MT4 chart data
   final Stream<Map<String, dynamic>>? chartDataStream;
   final void Function(String symbol, String timeframe, int terminalIndex)? onRequestChartData;
-  final void Function(String symbol, String timeframe, int terminalIndex)? onSubscribeChart;
-  final void Function(int terminalIndex)? onUnsubscribeChart;
   // New order
   final Map<String, String> symbolSuffixes;
   final Map<String, double> lotRatios;
@@ -55,8 +53,6 @@ class ChartScreen extends StatefulWidget {
     required this.onConfirmBeforeCloseChanged,
     this.chartDataStream,
     this.onRequestChartData,
-    this.onSubscribeChart,
-    this.onUnsubscribeChart,
     required this.symbolSuffixes,
     required this.lotRatios,
     required this.preferredPairs,
@@ -67,7 +63,7 @@ class ChartScreen extends StatefulWidget {
   State<ChartScreen> createState() => _ChartScreenState();
 }
 
-class _ChartScreenState extends State<ChartScreen> {
+class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
   late WebViewController _controller;
   String _currentSymbol = 'EURUSD';
   String _currentInterval = '15';
@@ -78,6 +74,7 @@ class _ChartScreenState extends State<ChartScreen> {
   final FocusNode _symbolFocusNode = FocusNode();
   Timer? _chartPollTimer;
   StreamSubscription<Map<String, dynamic>>? _chartDataSubscription;
+  bool _isAppInForeground = true; // Track if app is in foreground
   
   // Search overlay
   bool _showSearchOverlay = false;
@@ -108,11 +105,37 @@ class _ChartScreenState extends State<ChartScreen> {
   void initState() {
     super.initState();
     
+    // Register for app lifecycle changes
+    WidgetsBinding.instance.addObserver(this);
+    
     // Initialize WebView controller first (synchronous)
     _initWebView();
     
     // Then load preferences (async)
     _loadSavedPreferences();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    
+    switch (state) {
+      case AppLifecycleState.resumed:
+        // App came back to foreground - resume polling
+        _isAppInForeground = true;
+        if (_useMT4Data && _selectedAccountIndex != null && _chartPollTimer == null) {
+          _startChartPolling();
+        }
+        break;
+      case AppLifecycleState.paused:
+      case AppLifecycleState.inactive:
+      case AppLifecycleState.hidden:
+      case AppLifecycleState.detached:
+        // App went to background - stop polling
+        _isAppInForeground = false;
+        _stopChartPolling();
+        break;
+    }
   }
 
   Future<void> _loadSavedPreferences() async {
@@ -237,12 +260,15 @@ class _ChartScreenState extends State<ChartScreen> {
   }
 
   void _onChartReady() {
-    // Chart is initialized, now subscribe for data from MT4
+    // Chart is initialized, now start polling for data from MT4
     if (_useMT4Data && _selectedAccountIndex != null) {
       _hasReceivedData = false;
       
-      // Subscribe to chart updates (EA will send initial history + continuous updates)
-      _subscribeToChart();
+      // Request initial chart data
+      widget.onRequestChartData!(_currentSymbol, _currentInterval, _selectedAccountIndex!);
+      
+      // Start polling for updates every 500ms
+      _startChartPolling();
       
       // Set a timeout - if no data after 5 seconds, show error
       Future.delayed(const Duration(seconds: 5), () {
@@ -265,16 +291,17 @@ class _ChartScreenState extends State<ChartScreen> {
     }
   }
 
-  void _subscribeToChart() {
-    if (_selectedAccountIndex != null && _useMT4Data && widget.onSubscribeChart != null) {
-      widget.onSubscribeChart!(_currentSymbol, _currentInterval, _selectedAccountIndex!);
-    }
-  }
-
-  void _unsubscribeFromChart() {
-    if (_selectedAccountIndex != null && widget.onUnsubscribeChart != null) {
-      widget.onUnsubscribeChart!(_selectedAccountIndex!);
-    }
+  void _startChartPolling() {
+    // Don't start polling if app is in background
+    if (!_isAppInForeground) return;
+    
+    _stopChartPolling();
+    _chartPollTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
+      // Only poll if app is in foreground, we have a valid account, and MT4 data is enabled
+      if (_isAppInForeground && _selectedAccountIndex != null && _useMT4Data && widget.onRequestChartData != null) {
+        widget.onRequestChartData!(_currentSymbol, _currentInterval, _selectedAccountIndex!);
+      }
+    });
   }
 
   void _stopChartPolling() {
@@ -801,8 +828,7 @@ class _ChartScreenState extends State<ChartScreen> {
       _showSearchOverlay = false;
     });
     
-    // Unsubscribe from current chart before switching
-    _unsubscribeFromChart();
+    // Stop polling while switching symbols
     _stopChartPolling();
     
     final symbol = _symbolController.text.trim().toUpperCase();
@@ -990,8 +1016,9 @@ class _ChartScreenState extends State<ChartScreen> {
 
   @override
   void dispose() {
-    // IMPORTANT: Unsubscribe from chart updates on MT4 side
-    _unsubscribeFromChart();
+    // Remove lifecycle observer
+    WidgetsBinding.instance.removeObserver(this);
+    // Stop polling - this is all we need now (no more subscribe/unsubscribe)
     _stopChartPolling();
     _chartDataSubscription?.cancel();
     _symbolFocusNode.removeListener(_onFocusChange);

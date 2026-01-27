@@ -289,22 +289,6 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  void _subscribeChart(String symbol, String timeframe, int terminalIndex) {
-    _connection.send({
-      'action': 'subscribe_chart',
-      'symbol': symbol,
-      'timeframe': timeframe,
-      'terminalIndex': terminalIndex,
-    });
-  }
-
-  void _unsubscribeChart(int terminalIndex) {
-    _connection.send({
-      'action': 'unsubscribe_chart',
-      'terminalIndex': terminalIndex,
-    });
-  }
-
   void _openAccountDetail(Map<String, dynamic> account) {
     Navigator.push(
       context,
@@ -327,8 +311,6 @@ class _HomeScreenState extends State<HomeScreen> {
           onPlaceOrder: _placeOrder,
           chartDataStream: _chartDataController.stream,
           onRequestChartData: _requestChartData,
-          onSubscribeChart: _subscribeChart,
-          onUnsubscribeChart: _unsubscribeChart,
         ),
       ),
     );
@@ -575,8 +557,6 @@ class _HomeScreenState extends State<HomeScreen> {
           onConfirmBeforeCloseChanged: _updateConfirmBeforeClose,
           chartDataStream: _chartDataController.stream,
           onRequestChartData: _requestChartData,
-          onSubscribeChart: _subscribeChart,
-          onUnsubscribeChart: _unsubscribeChart,
           symbolSuffixes: _symbolSuffixes,
           lotRatios: _lotRatios,
           preferredPairs: _preferredPairs,

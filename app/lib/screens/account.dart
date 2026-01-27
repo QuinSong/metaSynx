@@ -31,11 +31,9 @@ class AccountDetailScreen extends StatefulWidget {
     required bool useRatios,
     required bool applySuffix,
   }) onPlaceOrder;
-  // Chart streaming
+  // Chart data
   final Stream<Map<String, dynamic>>? chartDataStream;
   final void Function(String symbol, String timeframe, int terminalIndex)? onRequestChartData;
-  final void Function(String symbol, String timeframe, int terminalIndex)? onSubscribeChart;
-  final void Function(int terminalIndex)? onUnsubscribeChart;
 
   const AccountDetailScreen({
     super.key,
@@ -56,8 +54,6 @@ class AccountDetailScreen extends StatefulWidget {
     required this.onPlaceOrder,
     this.chartDataStream,
     this.onRequestChartData,
-    this.onSubscribeChart,
-    this.onUnsubscribeChart,
   });
 
   @override
@@ -840,8 +836,6 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
           onPlaceOrder: widget.onPlaceOrder,
           chartDataStream: widget.chartDataStream,
           onRequestChartData: widget.onRequestChartData,
-          onSubscribeChart: widget.onSubscribeChart,
-          onUnsubscribeChart: widget.onUnsubscribeChart,
         ),
       ),
     );

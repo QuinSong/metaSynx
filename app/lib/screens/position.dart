@@ -29,11 +29,9 @@ class PositionDetailScreen extends StatefulWidget {
     required bool useRatios,
     required bool applySuffix,
   }) onPlaceOrder;
-  // Chart streaming (optional - may not be available from position screen)
+  // Chart data (optional - may not be available from position screen)
   final Stream<Map<String, dynamic>>? chartDataStream;
   final void Function(String symbol, String timeframe, int terminalIndex)? onRequestChartData;
-  final void Function(String symbol, String timeframe, int terminalIndex)? onSubscribeChart;
-  final void Function(int terminalIndex)? onUnsubscribeChart;
 
   const PositionDetailScreen({
     super.key,
@@ -54,8 +52,6 @@ class PositionDetailScreen extends StatefulWidget {
     required this.onPlaceOrder,
     this.chartDataStream,
     this.onRequestChartData,
-    this.onSubscribeChart,
-    this.onUnsubscribeChart,
   });
 
   @override
@@ -572,8 +568,6 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
           onConfirmBeforeCloseChanged: widget.onConfirmBeforeCloseChanged,
           chartDataStream: widget.chartDataStream,
           onRequestChartData: widget.onRequestChartData,
-          onSubscribeChart: widget.onSubscribeChart,
-          onUnsubscribeChart: widget.onUnsubscribeChart,
           symbolSuffixes: widget.symbolSuffixes,
           lotRatios: widget.lotRatios,
           preferredPairs: widget.preferredPairs,

@@ -128,14 +128,6 @@ class _HomeScreenState extends State<HomeScreen> {
         _handleGetChartData(message);
         break;
 
-      case 'subscribe_chart':
-        _handleSubscribeChart(message);
-        break;
-
-      case 'unsubscribe_chart':
-        _handleUnsubscribeChart(message);
-        break;
-
       default:
         _addLog('Unknown action: $action');
     }
@@ -233,33 +225,6 @@ class _HomeScreenState extends State<HomeScreen> {
         ...data,
       });
     }
-  }
-
-  Future<void> _handleSubscribeChart(Map<String, dynamic> message) async {
-    final symbol = message['symbol'] as String?;
-    final timeframe = message['timeframe'] as String?;
-    final terminalIndex = message['terminalIndex'] as int? ?? 0;
-    
-    if (symbol == null || timeframe == null) return;
-    
-    _addLog('Chart subscribe: $symbol $timeframe (terminal $terminalIndex)');
-    await _eaService.subscribeChart(symbol, timeframe, terminalIndex);
-    
-    // Start streaming chart data to mobile
-    _eaService.startChartStream(terminalIndex, (data) {
-      _connection?.send({
-        'action': 'chart_data',
-        ...data,
-      });
-    });
-  }
-
-  Future<void> _handleUnsubscribeChart(Map<String, dynamic> message) async {
-    final terminalIndex = message['terminalIndex'] as int? ?? 0;
-    
-    _addLog('Chart unsubscribe (terminal $terminalIndex)');
-    _eaService.stopChartStream(terminalIndex);
-    await _eaService.unsubscribeChart(terminalIndex);
   }
 
   void _regenerateRoom() async {
