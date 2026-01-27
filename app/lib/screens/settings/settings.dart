@@ -219,11 +219,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       backgroundColor: AppColors.background,
       appBar: AppBar(
         backgroundColor: AppColors.background,
+        automaticallyImplyLeading: false,
         title: const Text('Settings', style: TextStyle(color: Colors.white)),
-        leading: IconButton(
-          icon: const Icon(Icons.chevron_left, color: Colors.white),
-          onPressed: () => Navigator.pop(context),
-        ),
       ),
       body: SafeArea(
         top: false, // AppBar handles top

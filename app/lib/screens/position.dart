@@ -35,6 +35,8 @@ class PositionDetailScreen extends StatefulWidget {
   // Chart data (optional - may not be available from position screen)
   final Stream<Map<String, dynamic>>? chartDataStream;
   final void Function(String symbol, String timeframe, int terminalIndex)? onRequestChartData;
+  // Bottom nav bar for chart screen
+  final Widget? bottomNavBar;
 
   const PositionDetailScreen({
     super.key,
@@ -57,6 +59,7 @@ class PositionDetailScreen extends StatefulWidget {
     required this.onPlaceOrder,
     this.chartDataStream,
     this.onRequestChartData,
+    this.bottomNavBar,
   });
 
   @override
@@ -545,6 +548,7 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
 
   void _openChart() {
     final symbol = widget.position['symbol'] as String? ?? '';
+    final terminalIndex = widget.position['terminalIndex'] as int?;
     
     Navigator.push(
       context,
@@ -554,6 +558,7 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
           positionsNotifier: widget.positionsNotifier,
           accounts: widget.accounts,
           initialSymbol: symbol,
+          initialAccountIndex: terminalIndex,
           onClosePosition: widget.onClosePosition,
           onModifyPosition: widget.onModifyPosition,
           onCancelOrder: widget.onCancelOrder,
@@ -570,6 +575,7 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
           lotRatios: widget.lotRatios,
           preferredPairs: widget.preferredPairs,
           onPlaceOrder: widget.onPlaceOrder,
+          bottomNavBar: widget.bottomNavBar,
         ),
       ),
     );
@@ -586,7 +592,7 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
       appBar: AppBar(
         backgroundColor: AppColors.background,
         title: Text(
-          accountDisplayName,
+          'Position - $accountDisplayName',
           style: const TextStyle(color: Colors.white),
         ),
         leading: IconButton(

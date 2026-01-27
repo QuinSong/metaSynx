@@ -37,6 +37,8 @@ class AccountDetailScreen extends StatefulWidget {
   // Chart data
   final Stream<Map<String, dynamic>>? chartDataStream;
   final void Function(String symbol, String timeframe, int terminalIndex)? onRequestChartData;
+  // Bottom nav bar
+  final Widget? bottomNavBar;
 
   const AccountDetailScreen({
     super.key,
@@ -59,6 +61,7 @@ class AccountDetailScreen extends StatefulWidget {
     required this.onPlaceOrder,
     this.chartDataStream,
     this.onRequestChartData,
+    this.bottomNavBar,
   });
 
   @override
@@ -1358,6 +1361,7 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
           onPlaceOrder: widget.onPlaceOrder,
           chartDataStream: widget.chartDataStream,
           onRequestChartData: widget.onRequestChartData,
+          bottomNavBar: widget.bottomNavBar,
         ),
       ),
     );

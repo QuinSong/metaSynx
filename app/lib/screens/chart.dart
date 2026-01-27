@@ -11,6 +11,7 @@ class ChartScreen extends StatefulWidget {
   final ValueNotifier<List<Map<String, dynamic>>> positionsNotifier;
   final List<Map<String, dynamic>> accounts;
   final String? initialSymbol;
+  final int? initialAccountIndex;
   final void Function(int ticket, int terminalIndex) onClosePosition;
   final void Function(int ticket, int terminalIndex, double? sl, double? tp) onModifyPosition;
   final void Function(int ticket, int terminalIndex) onCancelOrder;
@@ -39,6 +40,8 @@ class ChartScreen extends StatefulWidget {
     required bool useRatios,
     required bool applySuffix,
   }) onPlaceOrder;
+  // Optional bottom nav bar for when opened from position screen
+  final Widget? bottomNavBar;
 
   const ChartScreen({
     super.key,
@@ -46,6 +49,7 @@ class ChartScreen extends StatefulWidget {
     required this.positionsNotifier,
     required this.accounts,
     this.initialSymbol,
+    this.initialAccountIndex,
     required this.onClosePosition,
     required this.onModifyPosition,
     required this.onCancelOrder,
@@ -62,6 +66,7 @@ class ChartScreen extends StatefulWidget {
     required this.lotRatios,
     required this.preferredPairs,
     required this.onPlaceOrder,
+    this.bottomNavBar,
   });
 
   @override
@@ -172,8 +177,11 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
     // Load B/A preference
     _showBidAskLines = savedShowBidAsk;
     
-    // Validate and set account index
-    if (savedAccountIndex != null && savedAccountIndex < widget.accounts.length) {
+    // Validate and set account index - prioritize initialAccountIndex
+    if (widget.initialAccountIndex != null) {
+      // If opened from a specific account, use that
+      _selectedAccountIndex = widget.initialAccountIndex;
+    } else if (savedAccountIndex != null && savedAccountIndex < widget.accounts.length) {
       _selectedAccountIndex = savedAccountIndex;
     } else if (widget.accounts.isNotEmpty) {
       _selectedAccountIndex = 0;
@@ -433,6 +441,7 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
             lotRatios: widget.lotRatios,
             preferredPairs: widget.preferredPairs,
             onPlaceOrder: widget.onPlaceOrder,
+            bottomNavBar: widget.bottomNavBar,
           ),
         ),
       ).then((_) {
@@ -2027,10 +2036,7 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
           backgroundColor: AppColors.background,
           appBar: AppBar(
             backgroundColor: AppColors.background,
-            leading: IconButton(
-              icon: const Icon(Icons.chevron_left, color: Colors.white),
-              onPressed: () => Navigator.pop(context),
-            ),
+            automaticallyImplyLeading: false,
             title: Row(
               children: [
                 Expanded(
@@ -2291,6 +2297,7 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
             _buildSearchOverlay(),
             ],
           ),
+          bottomNavigationBar: widget.bottomNavBar,
         );
       },
     );

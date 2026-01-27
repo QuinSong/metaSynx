@@ -21,23 +21,22 @@ class HistoryScreen extends StatefulWidget {
   State<HistoryScreen> createState() => _HistoryScreenState();
 }
 
-class _HistoryScreenState extends State<HistoryScreen>
-    with SingleTickerProviderStateMixin {
+class _HistoryScreenState extends State<HistoryScreen> with SingleTickerProviderStateMixin {
   late TabController _tabController;
   StreamSubscription<Map<String, dynamic>>? _historySubscription;
-
+  
   List<Map<String, dynamic>> _todayHistory = [];
   List<Map<String, dynamic>> _weekHistory = [];
   List<Map<String, dynamic>> _monthHistory = [];
-
+  
   bool _loadingToday = false;
   bool _loadingWeek = false;
   bool _loadingMonth = false;
-
+  
   bool _loadedToday = false;
   bool _loadedWeek = false;
   bool _loadedMonth = false;
-
+  
   // Filters
   String? _selectedAccount; // null = All
   String? _selectedSymbol; // null = All
@@ -47,10 +46,10 @@ class _HistoryScreenState extends State<HistoryScreen>
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
     _tabController.addListener(_onTabChanged);
-
+    
     // Listen to history data
     _historySubscription = widget.historyDataStream.listen(_onHistoryReceived);
-
+    
     // Load today's history initially
     _loadHistory('today');
   }
@@ -93,20 +92,18 @@ class _HistoryScreenState extends State<HistoryScreen>
           break;
       }
     });
-
+    
     widget.onRequestHistory(period, null);
   }
 
   void _onHistoryReceived(Map<String, dynamic> data) {
     if (data['action'] != 'history_data') return;
-
+    
     final period = data['period'] as String? ?? 'today';
-    final history =
-        (data['history'] as List<dynamic>?)
-            ?.map((e) => Map<String, dynamic>.from(e as Map))
-            .toList() ??
-        [];
-
+    final history = (data['history'] as List<dynamic>?)
+        ?.map((e) => Map<String, dynamic>.from(e as Map))
+        .toList() ?? [];
+    
     setState(() {
       switch (period) {
         case 'today':
@@ -153,9 +150,7 @@ class _HistoryScreenState extends State<HistoryScreen>
   }
 
   // Filter history by selected account and symbol
-  List<Map<String, dynamic>> _filterHistory(
-    List<Map<String, dynamic>> history,
-  ) {
+  List<Map<String, dynamic>> _filterHistory(List<Map<String, dynamic>> history) {
     return history.where((trade) {
       // Filter by account
       if (_selectedAccount != null) {
@@ -200,19 +195,13 @@ class _HistoryScreenState extends State<HistoryScreen>
   @override
   Widget build(BuildContext context) {
     final uniqueAccounts = _getUniqueAccounts().toList()..sort();
-
+    
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
         backgroundColor: AppColors.background,
-        leading: IconButton(
-          icon: const Icon(Icons.chevron_left, color: Colors.white),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: const Text(
-          'Trade History',
-          style: TextStyle(color: Colors.white),
-        ),
+        automaticallyImplyLeading: false,
+        title: const Text('Trade History', style: TextStyle(color: Colors.white)),
         bottom: TabBar(
           controller: _tabController,
           indicatorColor: AppColors.primary,
@@ -229,12 +218,7 @@ class _HistoryScreenState extends State<HistoryScreen>
         children: [
           // Filter row
           Container(
-            padding: const EdgeInsets.only(
-              left: 16,
-              right: 16,
-              top: 14,
-              bottom: 6,
-            ),
+            padding: const EdgeInsets.only(left: 16, right: 16, top: 14, bottom: 6),
             color: AppColors.surface,
             child: Row(
               children: [
@@ -243,21 +227,14 @@ class _HistoryScreenState extends State<HistoryScreen>
                   child: _buildFilterDropdown(
                     value: _selectedAccount,
                     hint: 'All Accounts',
-                    items: uniqueAccounts
-                        .map(
-                          (acc) => DropdownMenuItem<String>(
-                            value: acc,
-                            child: Text(
-                              widget.accountNames[acc] ?? acc,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 13,
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        )
-                        .toList(),
+                    items: uniqueAccounts.map((acc) => DropdownMenuItem<String>(
+                      value: acc,
+                      child: Text(
+                        widget.accountNames[acc] ?? acc,
+                        style: const TextStyle(color: Colors.white, fontSize: 13),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    )).toList(),
                     onChanged: (value) {
                       setState(() {
                         _selectedAccount = value;
@@ -270,32 +247,23 @@ class _HistoryScreenState extends State<HistoryScreen>
                 Expanded(
                   child: Builder(
                     builder: (context) {
-                      final currentHistory = _tabController.index == 0
-                          ? _todayHistory
-                          : _tabController.index == 1
-                          ? _weekHistory
-                          : _monthHistory;
-                      final uniqueSymbols = _getUniqueSymbols(
-                        currentHistory,
-                      ).toList()..sort();
-
+                      final currentHistory = _tabController.index == 0 
+                          ? _todayHistory 
+                          : _tabController.index == 1 
+                              ? _weekHistory 
+                              : _monthHistory;
+                      final uniqueSymbols = _getUniqueSymbols(currentHistory).toList()..sort();
+                      
                       return _buildFilterDropdown(
                         value: _selectedSymbol,
                         hint: 'All Symbols',
-                        items: uniqueSymbols
-                            .map(
-                              (sym) => DropdownMenuItem<String>(
-                                value: sym,
-                                child: Text(
-                                  sym,
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 13,
-                                  ),
-                                ),
-                              ),
-                            )
-                            .toList(),
+                        items: uniqueSymbols.map((sym) => DropdownMenuItem<String>(
+                          value: sym,
+                          child: Text(
+                            sym,
+                            style: const TextStyle(color: Colors.white, fontSize: 13),
+                          ),
+                        )).toList(),
                         onChanged: (value) {
                           setState(() {
                             _selectedSymbol = value;
@@ -341,30 +309,14 @@ class _HistoryScreenState extends State<HistoryScreen>
       child: DropdownButtonHideUnderline(
         child: DropdownButton<String>(
           value: value,
-          hint: Text(
-            hint,
-            style: const TextStyle(
-              color: AppColors.textSecondary,
-              fontSize: 13,
-            ),
-          ),
-          icon: const Icon(
-            Icons.arrow_drop_down,
-            color: AppColors.textSecondary,
-            size: 20,
-          ),
+          hint: Text(hint, style: const TextStyle(color: AppColors.textSecondary, fontSize: 13)),
+          icon: const Icon(Icons.arrow_drop_down, color: AppColors.textSecondary, size: 20),
           isExpanded: true,
           dropdownColor: AppColors.surface,
           items: [
             DropdownMenuItem<String>(
               value: null,
-              child: Text(
-                hint,
-                style: const TextStyle(
-                  color: AppColors.textSecondary,
-                  fontSize: 13,
-                ),
-              ),
+              child: Text(hint, style: const TextStyle(color: AppColors.textSecondary, fontSize: 13)),
             ),
             ...items,
           ],
@@ -374,11 +326,7 @@ class _HistoryScreenState extends State<HistoryScreen>
     );
   }
 
-  Widget _buildHistoryList(
-    List<Map<String, dynamic>> history,
-    bool loading,
-    String period,
-  ) {
+  Widget _buildHistoryList(List<Map<String, dynamic>> history, bool loading, String period) {
     if (loading) {
       return const Center(
         child: CircularProgressIndicator(color: AppColors.primary),
@@ -399,10 +347,7 @@ class _HistoryScreenState extends State<HistoryScreen>
             const SizedBox(height: 8),
             TextButton(
               onPressed: () => _loadHistory(period),
-              child: const Text(
-                'Refresh',
-                style: TextStyle(color: AppColors.primary),
-              ),
+              child: const Text('Refresh', style: TextStyle(color: AppColors.primary)),
             ),
           ],
         ),
@@ -411,17 +356,13 @@ class _HistoryScreenState extends State<HistoryScreen>
 
     // Apply filters
     final filteredHistory = _filterHistory(history);
-
+    
     if (filteredHistory.isEmpty) {
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(
-              Icons.filter_list_off,
-              size: 64,
-              color: AppColors.textMuted,
-            ),
+            const Icon(Icons.filter_list_off, size: 64, color: AppColors.textMuted),
             const SizedBox(height: 16),
             const Text(
               'No trades match filters',
@@ -435,10 +376,7 @@ class _HistoryScreenState extends State<HistoryScreen>
                   _selectedSymbol = null;
                 });
               },
-              child: const Text(
-                'Clear Filters',
-                style: TextStyle(color: AppColors.primary),
-              ),
+              child: const Text('Clear Filters', style: TextStyle(color: AppColors.primary)),
             ),
           ],
         ),
@@ -461,20 +399,12 @@ class _HistoryScreenState extends State<HistoryScreen>
                 children: [
                   Text(
                     '${filteredHistory.length} trades',
-                    style: const TextStyle(
-                      color: AppColors.textSecondary,
-                      fontSize: 13,
-                    ),
+                    style: const TextStyle(color: AppColors.textSecondary, fontSize: 13),
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    widget.includeCommissionSwap
-                        ? 'Net Total P/L'
-                        : 'Total P/L',
-                    style: const TextStyle(
-                      color: AppColors.textSecondary,
-                      fontSize: 12,
-                    ),
+                    widget.includeCommissionSwap ? 'Net Total P/L' : 'Total P/L',
+                    style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
                   ),
                 ],
               ),
@@ -484,9 +414,7 @@ class _HistoryScreenState extends State<HistoryScreen>
                   Text(
                     Formatters.formatCurrencyWithSign(totalProfit),
                     style: TextStyle(
-                      color: totalProfit >= 0
-                          ? AppColors.primary
-                          : AppColors.error,
+                      color: totalProfit >= 0 ? AppColors.primary : AppColors.error,
                       fontSize: 20,
                       fontWeight: FontWeight.bold,
                     ),
@@ -496,7 +424,7 @@ class _HistoryScreenState extends State<HistoryScreen>
             ],
           ),
         ),
-
+        
         // Trade list
         Expanded(
           child: RefreshIndicator(
@@ -505,8 +433,7 @@ class _HistoryScreenState extends State<HistoryScreen>
             child: ListView.builder(
               padding: const EdgeInsets.symmetric(vertical: 8),
               itemCount: filteredHistory.length,
-              itemBuilder: (context, index) =>
-                  _buildTradeItem(filteredHistory[index]),
+              itemBuilder: (context, index) => _buildTradeItem(filteredHistory[index]),
             ),
           ),
         ),
@@ -525,13 +452,13 @@ class _HistoryScreenState extends State<HistoryScreen>
     final commission = (trade['commission'] as num?)?.toDouble() ?? 0;
     final closeTime = trade['closeTime'] as int?;
     final accountName = _getAccountName(trade);
-
-    final displayProfit = widget.includeCommissionSwap
-        ? profit + swap + commission
+    
+    final displayProfit = widget.includeCommissionSwap 
+        ? profit + swap + commission 
         : profit;
-
+    
     final isBuy = type == 'BUY';
-
+    
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       padding: const EdgeInsets.all(12),
@@ -559,12 +486,9 @@ class _HistoryScreenState extends State<HistoryScreen>
                     ),
                     const SizedBox(width: 8),
                     Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 2,
-                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                       decoration: BoxDecoration(
-                        color: isBuy
+                        color: isBuy 
                             ? AppColors.primary.withOpacity(0.15)
                             : AppColors.error.withOpacity(0.15),
                         borderRadius: BorderRadius.circular(4),
@@ -581,23 +505,21 @@ class _HistoryScreenState extends State<HistoryScreen>
                   ],
                 ),
               ),
-
+              
               // Profit
               Text(
                 Formatters.formatCurrencyWithSign(displayProfit),
                 style: TextStyle(
-                  color: displayProfit >= 0
-                      ? AppColors.primary
-                      : AppColors.error,
+                  color: displayProfit >= 0 ? AppColors.primary : AppColors.error,
                   fontSize: 14,
                   fontWeight: FontWeight.bold,
                 ),
               ),
             ],
           ),
-
+          
           const SizedBox(height: 6),
-
+          
           // Middle row: Account and Date/Time
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -618,40 +540,29 @@ class _HistoryScreenState extends State<HistoryScreen>
               ),
             ],
           ),
-
+          
           const SizedBox(height: 6),
-
+          
           // Bottom row: Prices
           Row(
             children: [
               Text(
                 'Open: ${_formatPrice(openPrice, symbol)}',
-                style: const TextStyle(
-                  color: AppColors.textSecondary,
-                  fontSize: 12,
-                ),
+                style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
               ),
               const SizedBox(width: 16),
               Text(
                 'Close: ${_formatPrice(closePrice, symbol)}',
-                style: const TextStyle(
-                  color: AppColors.textSecondary,
-                  fontSize: 12,
-                ),
+                style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
               ),
-              if (widget.includeCommissionSwap &&
-                  (swap != 0 || commission != 0)) ...[
+              if (widget.includeCommissionSwap && (swap != 0 || commission != 0)) ...[
                 const Spacer(),
                 Text(
                   [
                     if (swap != 0) 'Swap: ${swap.toStringAsFixed(2)}',
-                    if (commission != 0)
-                      'Comm: ${commission.toStringAsFixed(2)}',
+                    if (commission != 0) 'Comm: ${commission.toStringAsFixed(2)}',
                   ].join(' '),
-                  style: const TextStyle(
-                    color: AppColors.textMuted,
-                    fontSize: 10,
-                  ),
+                  style: const TextStyle(color: AppColors.textMuted, fontSize: 10),
                 ),
               ],
             ],
@@ -664,10 +575,8 @@ class _HistoryScreenState extends State<HistoryScreen>
   String _formatPrice(double price, String symbol) {
     // Determine decimal places based on price level
     int decimals = 5;
-    if (price > 1000)
-      decimals = 2;
-    else if (price > 10)
-      decimals = 3;
+    if (price > 1000) decimals = 2;
+    else if (price > 10) decimals = 3;
     return price.toStringAsFixed(decimals);
   }
 }

@@ -2,7 +2,7 @@ import os
 import time
 
 
-msg = 'limit/stop orders complete'
+msg = 'added nav bar'
 
 
 os.system('git add .')

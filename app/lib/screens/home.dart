@@ -44,6 +44,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _confirmBeforeClose = true;
   Timer? _refreshTimer;
   bool _isAppInForeground = true;
+  int _selectedNavIndex = 0;
 
   @override
   void initState() {
@@ -122,6 +123,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _confirmBeforeClose = prefs.getBool('confirm_before_close') ?? true;
     
     setState(() {});
+  }
+
+  Future<void> _saveSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('account_names', jsonEncode(_accountNames));
+    await prefs.setString('main_account', _mainAccountNum ?? '');
+    await prefs.setString('lot_ratios', jsonEncode(_lotRatios));
+    await prefs.setString('symbol_suffixes', jsonEncode(_symbolSuffixes));
+    await prefs.setString('preferred_pairs', jsonEncode(_preferredPairs.toList()));
+    await prefs.setBool('include_commission_swap', _includeCommissionSwap);
+    await prefs.setBool('show_pl_percent', _showPLPercent);
+    await prefs.setBool('confirm_before_close', _confirmBeforeClose);
   }
 
   Future<void> _updateConfirmBeforeClose(bool value) async {
@@ -382,6 +395,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           onPlaceOrder: _placeOrder,
           chartDataStream: _chartDataController.stream,
           onRequestChartData: _requestChartData,
+          bottomNavBar: _buildExternalNavBar(1), // Chart highlighted
         ),
       ),
     );
@@ -504,126 +518,24 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    final showFab = _connectionState == relay.ConnectionState.connected &&
+    final isConnected = _connectionState == relay.ConnectionState.connected &&
         _bridgeConnected &&
         _accountsNotifier.value.isNotEmpty;
 
     return Scaffold(
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildHeader(),
-              const SizedBox(height: 10),
-              ConnectionCard(
-                connectionState: _connectionState,
-                bridgeConnected: _bridgeConnected,
-                roomId: _roomId,
-                onDisconnect: _disconnect,
-              ),
-              const SizedBox(height: 24),
-              if (_connectionState == relay.ConnectionState.connected &&
-                  _bridgeConnected) ...[
-                Text(
-                  'ACCOUNTS (${_accountsNotifier.value.length})',
-                  style: AppTextStyles.label,
-                ),
-                const SizedBox(height: 12),
-                Expanded(
-                  child: _accountsNotifier.value.isEmpty
-                      ? _buildLoadingAccounts()
-                      : ValueListenableBuilder<List<Map<String, dynamic>>>(
-                          valueListenable: _accountsNotifier,
-                          builder: (context, accounts, _) {
-                            return ValueListenableBuilder<List<Map<String, dynamic>>>(
-                              valueListenable: _positionsNotifier,
-                              builder: (context, positions, _) {
-                                // Sort accounts with main account first
-                                final sortedAccounts = List<Map<String, dynamic>>.from(accounts);
-                                sortedAccounts.sort((a, b) {
-                                  final aIsMain = a['account'] == _mainAccountNum;
-                                  final bIsMain = b['account'] == _mainAccountNum;
-                                  if (aIsMain && !bIsMain) return -1;
-                                  if (!aIsMain && bIsMain) return 1;
-                                  return (a['index'] as int? ?? 0).compareTo(b['index'] as int? ?? 0);
-                                });
-                                return ListView(
-                                  children: [
-                                    // Show totals section if more than 1 account
-                                    if (sortedAccounts.length > 1)
-                                      _buildTotalsSection(sortedAccounts, positions),
-                                    // Account cards
-                                    ...sortedAccounts.map((account) => _buildAccountCard(account)),
-                                    // Spacer for FAB clearance
-                                    const SizedBox(height: 80),
-                                  ],
-                                );
-                              },
-                            );
-                          },
-                        ),
-                ),
-              ] else
-                const Spacer(),
-              if (_connectionState == relay.ConnectionState.disconnected)
-                ScanButton(onPressed: _openScanner),
-            ],
-          ),
-        ),
+        child: isConnected ? _buildCurrentScreen() : _buildHomeContent(),
       ),
-      floatingActionButton: showFab
-          ? FloatingActionButton.extended(
-              heroTag: null,
-              onPressed: _openNewOrder,
-              backgroundColor: AppColors.primary,
-              icon: const Icon(Icons.add, color: Colors.black),
-              label: const Text(
-                'New Order',
-                style: TextStyle(
-                  color: Colors.black,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            )
-          : null,
+      bottomNavigationBar: _buildBottomNavBar(),
     );
   }
 
-  Widget _buildHeader() {
-    return Row(
-      children: [
-        const Text('METASYNX', style: AppTextStyles.heading),
-        const Spacer(),
-        if (_connectionState == relay.ConnectionState.connected &&
-            _bridgeConnected &&
-            _accountsNotifier.value.isNotEmpty) ...[
-          IconButton(
-            icon: const Icon(Icons.candlestick_chart, color: AppColors.primary),
-            onPressed: _openChart,
-            tooltip: 'Chart',
-          ),
-          IconButton(
-            icon: const Icon(Icons.history, color: AppColors.primary),
-            onPressed: _openHistory,
-            tooltip: 'Trade History',
-          ),
-          IconButton(
-            icon: const Icon(Icons.settings, color: AppColors.primary),
-            onPressed: _openAccountSettings,
-            tooltip: 'Account Settings',
-          ),
-        ],
-      ],
-    );
-  }
-
-  void _openChart() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => ChartScreen(
+  Widget _buildCurrentScreen() {
+    switch (_selectedNavIndex) {
+      case 0:
+        return _buildHomeContent();
+      case 1:
+        return ChartScreen(
           positions: _positionsNotifier.value,
           positionsNotifier: _positionsNotifier,
           accounts: _accountsNotifier.value,
@@ -643,30 +555,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           lotRatios: _lotRatios,
           preferredPairs: _preferredPairs,
           onPlaceOrder: _placeOrder,
-        ),
-      ),
-    );
-  }
-
-  void _openHistory() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => HistoryScreen(
+        );
+      case 2:
+        return HistoryScreen(
           accountNames: _accountNames,
           historyDataStream: _historyDataController.stream,
           onRequestHistory: _requestHistory,
           includeCommissionSwap: _includeCommissionSwap,
-        ),
-      ),
-    );
-  }
-
-  void _openAccountSettings() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => SettingsScreen(
+        );
+      case 3:
+        return SettingsScreen(
           accounts: _accountsNotifier.value,
           accountNames: _accountNames,
           mainAccountNum: _mainAccountNum,
@@ -680,21 +578,25 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             setState(() {
               _accountNames = names;
             });
+            _saveSettings();
           },
-          onMainAccountUpdated: (mainAccount) {
+          onMainAccountUpdated: (accountNum) {
             setState(() {
-              _mainAccountNum = mainAccount;
+              _mainAccountNum = accountNum;
             });
+            _saveSettings();
           },
           onLotRatiosUpdated: (ratios) {
             setState(() {
               _lotRatios = ratios;
             });
+            _saveSettings();
           },
           onSymbolSuffixesUpdated: (suffixes) {
             setState(() {
               _symbolSuffixes = suffixes;
             });
+            _saveSettings();
           },
           onPreferredPairsUpdated: (pairs) {
             setState(() {
@@ -716,8 +618,172 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               _confirmBeforeClose = value;
             });
           },
+        );
+      default:
+        return _buildHomeContent();
+    }
+  }
+
+  Widget _buildHomeContent() {
+    return Padding(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildHeader(),
+          const SizedBox(height: 10),
+          ConnectionCard(
+            connectionState: _connectionState,
+            bridgeConnected: _bridgeConnected,
+            roomId: _roomId,
+            onDisconnect: _disconnect,
+          ),
+          const SizedBox(height: 24),
+          if (_connectionState == relay.ConnectionState.connected &&
+              _bridgeConnected) ...[
+            Text(
+              'ACCOUNTS (${_accountsNotifier.value.length})',
+              style: AppTextStyles.label,
+            ),
+            const SizedBox(height: 12),
+            Expanded(
+              child: _accountsNotifier.value.isEmpty
+                  ? _buildLoadingAccounts()
+                  : ValueListenableBuilder<List<Map<String, dynamic>>>(
+                      valueListenable: _accountsNotifier,
+                      builder: (context, accounts, _) {
+                        return ValueListenableBuilder<List<Map<String, dynamic>>>(
+                          valueListenable: _positionsNotifier,
+                          builder: (context, positions, _) {
+                            // Sort accounts with main account first
+                            final sortedAccounts = List<Map<String, dynamic>>.from(accounts);
+                            sortedAccounts.sort((a, b) {
+                              final aIsMain = a['account'] == _mainAccountNum;
+                              final bIsMain = b['account'] == _mainAccountNum;
+                              if (aIsMain && !bIsMain) return -1;
+                              if (!aIsMain && bIsMain) return 1;
+                              return (a['index'] as int? ?? 0).compareTo(b['index'] as int? ?? 0);
+                            });
+                            return ListView(
+                              children: [
+                                // Show totals section if more than 1 account
+                                if (sortedAccounts.length > 1)
+                                  _buildTotalsSection(sortedAccounts, positions),
+                                // Account cards
+                                ...sortedAccounts.map((account) => _buildAccountCard(account)),
+                              ],
+                            );
+                          },
+                        );
+                      },
+                    ),
+            ),
+          ] else
+            const Spacer(),
+          if (_connectionState == relay.ConnectionState.disconnected)
+            ScanButton(onPressed: _openScanner),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBottomNavBar() {
+    final isConnected = _connectionState == relay.ConnectionState.connected &&
+        _bridgeConnected &&
+        _accountsNotifier.value.isNotEmpty;
+    
+    if (!isConnected) return const SizedBox.shrink();
+    
+    return _buildNavBarContent(_selectedNavIndex, (index) {
+      setState(() {
+        _selectedNavIndex = index;
+      });
+    });
+  }
+
+  // Build nav bar for pushed screens (account detail -> position -> chart)
+  Widget _buildExternalNavBar(int selectedIndex) {
+    return _buildNavBarContent(selectedIndex, (index) {
+      // Pop all routes back to home and set the selected tab
+      Navigator.of(context).popUntil((route) => route.isFirst);
+      setState(() {
+        _selectedNavIndex = index;
+      });
+    });
+  }
+
+  Widget _buildNavBarContent(int selectedIndex, void Function(int) onTap) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: AppColors.surface,
+        border: Border(
+          top: BorderSide(color: AppColors.border, width: 1),
         ),
       ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              _buildNavItemWithCallback(Icons.home, 'Home', 0, selectedIndex, onTap),
+              _buildNavItemWithCallback(Icons.candlestick_chart, 'Chart', 1, selectedIndex, onTap),
+              _buildNavItemWithCallback(Icons.history, 'History', 2, selectedIndex, onTap),
+              _buildNavItemWithCallback(Icons.settings, 'Settings', 3, selectedIndex, onTap),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildNavItemWithCallback(IconData icon, String label, int index, int selectedIndex, void Function(int) onTap) {
+    final isSelected = selectedIndex == index;
+    return GestureDetector(
+      onTap: () => onTap(index),
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              color: isSelected ? AppColors.primary : AppColors.textSecondary,
+              size: 22,
+            ),
+            const SizedBox(height: 2),
+            Text(
+              label,
+              style: TextStyle(
+                color: isSelected ? AppColors.primary : AppColors.textSecondary,
+                fontSize: 10,
+                fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHeader() {
+    final showNewOrderButton = _connectionState == relay.ConnectionState.connected &&
+        _bridgeConnected &&
+        _accountsNotifier.value.isNotEmpty;
+    
+    return Row(
+      children: [
+        const Text('METASYNX', style: AppTextStyles.heading),
+        const Spacer(),
+        if (showNewOrderButton)
+          IconButton(
+            icon: const Icon(Icons.add_circle, color: AppColors.primary, size: 28),
+            onPressed: _openNewOrder,
+            tooltip: 'New Order',
+          ),
+      ],
     );
   }
 
