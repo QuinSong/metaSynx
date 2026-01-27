@@ -531,7 +531,7 @@ void WriteHistory(string period)
    json += "]}";
    
    // Write to history file
-   string filename = g_bridgeFolder + "\\history_" + IntegerToString(g_terminalIndex) + ".json";
+   string filename = BridgeFolder + "\\history_" + IntegerToString(g_terminalIndex) + ".json";
    int handle = FileOpen(filename, FILE_WRITE|FILE_TXT|FILE_COMMON);
    if(handle != INVALID_HANDLE)
    {

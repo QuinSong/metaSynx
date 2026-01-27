@@ -2,7 +2,7 @@ import os
 import time
 
 
-msg = 'start with history screen 1'
+msg = 'finish history screen'
 
 
 os.system('git add .')

@@ -21,31 +21,36 @@ class HistoryScreen extends StatefulWidget {
   State<HistoryScreen> createState() => _HistoryScreenState();
 }
 
-class _HistoryScreenState extends State<HistoryScreen> with SingleTickerProviderStateMixin {
+class _HistoryScreenState extends State<HistoryScreen>
+    with SingleTickerProviderStateMixin {
   late TabController _tabController;
   StreamSubscription<Map<String, dynamic>>? _historySubscription;
-  
+
   List<Map<String, dynamic>> _todayHistory = [];
   List<Map<String, dynamic>> _weekHistory = [];
   List<Map<String, dynamic>> _monthHistory = [];
-  
+
   bool _loadingToday = false;
   bool _loadingWeek = false;
   bool _loadingMonth = false;
-  
+
   bool _loadedToday = false;
   bool _loadedWeek = false;
   bool _loadedMonth = false;
+
+  // Filters
+  String? _selectedAccount; // null = All
+  String? _selectedSymbol; // null = All
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
     _tabController.addListener(_onTabChanged);
-    
+
     // Listen to history data
     _historySubscription = widget.historyDataStream.listen(_onHistoryReceived);
-    
+
     // Load today's history initially
     _loadHistory('today');
   }
@@ -88,18 +93,20 @@ class _HistoryScreenState extends State<HistoryScreen> with SingleTickerProvider
           break;
       }
     });
-    
+
     widget.onRequestHistory(period, null);
   }
 
   void _onHistoryReceived(Map<String, dynamic> data) {
     if (data['action'] != 'history_data') return;
-    
+
     final period = data['period'] as String? ?? 'today';
-    final history = (data['history'] as List<dynamic>?)
-        ?.map((e) => Map<String, dynamic>.from(e as Map))
-        .toList() ?? [];
-    
+    final history =
+        (data['history'] as List<dynamic>?)
+            ?.map((e) => Map<String, dynamic>.from(e as Map))
+            .toList() ??
+        [];
+
     setState(() {
       switch (period) {
         case 'today':
@@ -119,6 +126,49 @@ class _HistoryScreenState extends State<HistoryScreen> with SingleTickerProvider
           break;
       }
     });
+  }
+
+  // Get all unique accounts from all loaded history
+  Set<String> _getUniqueAccounts() {
+    final accounts = <String>{};
+    for (final trade in [..._todayHistory, ..._weekHistory, ..._monthHistory]) {
+      final account = trade['account']?.toString();
+      if (account != null && account.isNotEmpty) {
+        accounts.add(account);
+      }
+    }
+    return accounts;
+  }
+
+  // Get unique symbols from current tab's history
+  Set<String> _getUniqueSymbols(List<Map<String, dynamic>> history) {
+    final symbols = <String>{};
+    for (final trade in history) {
+      final symbol = trade['symbol']?.toString();
+      if (symbol != null && symbol.isNotEmpty) {
+        symbols.add(symbol);
+      }
+    }
+    return symbols;
+  }
+
+  // Filter history by selected account and symbol
+  List<Map<String, dynamic>> _filterHistory(
+    List<Map<String, dynamic>> history,
+  ) {
+    return history.where((trade) {
+      // Filter by account
+      if (_selectedAccount != null) {
+        final account = trade['account']?.toString();
+        if (account != _selectedAccount) return false;
+      }
+      // Filter by symbol
+      if (_selectedSymbol != null) {
+        final symbol = trade['symbol']?.toString();
+        if (symbol != _selectedSymbol) return false;
+      }
+      return true;
+    }).toList();
   }
 
   double _calculateTotalProfit(List<Map<String, dynamic>> history) {
@@ -144,11 +194,13 @@ class _HistoryScreenState extends State<HistoryScreen> with SingleTickerProvider
   String _formatDateTime(int? timestamp) {
     if (timestamp == null || timestamp == 0) return '--';
     final dt = DateTime.fromMillisecondsSinceEpoch(timestamp * 1000);
-    return '${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+    return '${dt.year}.${dt.month.toString().padLeft(2, '0')}.${dt.day.toString().padLeft(2, '0')} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}:${dt.second.toString().padLeft(2, '0')}';
   }
 
   @override
   Widget build(BuildContext context) {
+    final uniqueAccounts = _getUniqueAccounts().toList()..sort();
+
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
@@ -157,7 +209,10 @@ class _HistoryScreenState extends State<HistoryScreen> with SingleTickerProvider
           icon: const Icon(Icons.chevron_left, color: Colors.white),
           onPressed: () => Navigator.pop(context),
         ),
-        title: const Text('Trade History', style: TextStyle(color: Colors.white)),
+        title: const Text(
+          'Trade History',
+          style: TextStyle(color: Colors.white),
+        ),
         bottom: TabBar(
           controller: _tabController,
           indicatorColor: AppColors.primary,
@@ -170,18 +225,160 @@ class _HistoryScreenState extends State<HistoryScreen> with SingleTickerProvider
           ],
         ),
       ),
-      body: TabBarView(
-        controller: _tabController,
+      body: Column(
         children: [
-          _buildHistoryList(_todayHistory, _loadingToday, 'today'),
-          _buildHistoryList(_weekHistory, _loadingWeek, 'week'),
-          _buildHistoryList(_monthHistory, _loadingMonth, 'month'),
+          // Filter row
+          Container(
+            padding: const EdgeInsets.only(
+              left: 16,
+              right: 16,
+              top: 14,
+              bottom: 6,
+            ),
+            color: AppColors.surface,
+            child: Row(
+              children: [
+                // Account filter
+                Expanded(
+                  child: _buildFilterDropdown(
+                    value: _selectedAccount,
+                    hint: 'All Accounts',
+                    items: uniqueAccounts
+                        .map(
+                          (acc) => DropdownMenuItem<String>(
+                            value: acc,
+                            child: Text(
+                              widget.accountNames[acc] ?? acc,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 13,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (value) {
+                      setState(() {
+                        _selectedAccount = value;
+                      });
+                    },
+                  ),
+                ),
+                const SizedBox(width: 12),
+                // Symbol filter - based on current tab
+                Expanded(
+                  child: Builder(
+                    builder: (context) {
+                      final currentHistory = _tabController.index == 0
+                          ? _todayHistory
+                          : _tabController.index == 1
+                          ? _weekHistory
+                          : _monthHistory;
+                      final uniqueSymbols = _getUniqueSymbols(
+                        currentHistory,
+                      ).toList()..sort();
+
+                      return _buildFilterDropdown(
+                        value: _selectedSymbol,
+                        hint: 'All Symbols',
+                        items: uniqueSymbols
+                            .map(
+                              (sym) => DropdownMenuItem<String>(
+                                value: sym,
+                                child: Text(
+                                  sym,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (value) {
+                          setState(() {
+                            _selectedSymbol = value;
+                          });
+                        },
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // Tab content
+          Expanded(
+            child: TabBarView(
+              controller: _tabController,
+              children: [
+                _buildHistoryList(_todayHistory, _loadingToday, 'today'),
+                _buildHistoryList(_weekHistory, _loadingWeek, 'week'),
+                _buildHistoryList(_monthHistory, _loadingMonth, 'month'),
+              ],
+            ),
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildHistoryList(List<Map<String, dynamic>> history, bool loading, String period) {
+  Widget _buildFilterDropdown({
+    required String? value,
+    required String hint,
+    required List<DropdownMenuItem<String>> items,
+    required void Function(String?) onChanged,
+  }) {
+    return Container(
+      height: 36,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        color: AppColors.background,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: value,
+          hint: Text(
+            hint,
+            style: const TextStyle(
+              color: AppColors.textSecondary,
+              fontSize: 13,
+            ),
+          ),
+          icon: const Icon(
+            Icons.arrow_drop_down,
+            color: AppColors.textSecondary,
+            size: 20,
+          ),
+          isExpanded: true,
+          dropdownColor: AppColors.surface,
+          items: [
+            DropdownMenuItem<String>(
+              value: null,
+              child: Text(
+                hint,
+                style: const TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: 13,
+                ),
+              ),
+            ),
+            ...items,
+          ],
+          onChanged: onChanged,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHistoryList(
+    List<Map<String, dynamic>> history,
+    bool loading,
+    String period,
+  ) {
     if (loading) {
       return const Center(
         child: CircularProgressIndicator(color: AppColors.primary),
@@ -193,29 +390,68 @@ class _HistoryScreenState extends State<HistoryScreen> with SingleTickerProvider
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.history, size: 64, color: AppColors.textMuted),
+            const Icon(Icons.history, size: 64, color: AppColors.textMuted),
             const SizedBox(height: 16),
-            Text(
+            const Text(
               'No closed trades',
               style: TextStyle(color: AppColors.textSecondary, fontSize: 16),
             ),
             const SizedBox(height: 8),
             TextButton(
               onPressed: () => _loadHistory(period),
-              child: const Text('Refresh', style: TextStyle(color: AppColors.primary)),
+              child: const Text(
+                'Refresh',
+                style: TextStyle(color: AppColors.primary),
+              ),
             ),
           ],
         ),
       );
     }
 
-    final totalProfit = _calculateTotalProfit(history);
+    // Apply filters
+    final filteredHistory = _filterHistory(history);
+
+    if (filteredHistory.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(
+              Icons.filter_list_off,
+              size: 64,
+              color: AppColors.textMuted,
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'No trades match filters',
+              style: TextStyle(color: AppColors.textSecondary, fontSize: 16),
+            ),
+            const SizedBox(height: 8),
+            TextButton(
+              onPressed: () {
+                setState(() {
+                  _selectedAccount = null;
+                  _selectedSymbol = null;
+                });
+              },
+              child: const Text(
+                'Clear Filters',
+                style: TextStyle(color: AppColors.primary),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final totalProfit = _calculateTotalProfit(filteredHistory);
 
     return Column(
       children: [
         // Summary header
         Container(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           color: AppColors.surface,
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -224,13 +460,21 @@ class _HistoryScreenState extends State<HistoryScreen> with SingleTickerProvider
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    '${history.length} trades',
-                    style: const TextStyle(color: AppColors.textSecondary, fontSize: 13),
+                    '${filteredHistory.length} trades',
+                    style: const TextStyle(
+                      color: AppColors.textSecondary,
+                      fontSize: 13,
+                    ),
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 2),
                   Text(
-                    widget.includeCommissionSwap ? 'Net Total P/L' : 'Total P/L',
-                    style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
+                    widget.includeCommissionSwap
+                        ? 'Net Total P/L'
+                        : 'Total P/L',
+                    style: const TextStyle(
+                      color: AppColors.textSecondary,
+                      fontSize: 12,
+                    ),
                   ),
                 ],
               ),
@@ -240,7 +484,9 @@ class _HistoryScreenState extends State<HistoryScreen> with SingleTickerProvider
                   Text(
                     Formatters.formatCurrencyWithSign(totalProfit),
                     style: TextStyle(
-                      color: totalProfit >= 0 ? AppColors.primary : AppColors.error,
+                      color: totalProfit >= 0
+                          ? AppColors.primary
+                          : AppColors.error,
                       fontSize: 20,
                       fontWeight: FontWeight.bold,
                     ),
@@ -250,7 +496,7 @@ class _HistoryScreenState extends State<HistoryScreen> with SingleTickerProvider
             ],
           ),
         ),
-        
+
         // Trade list
         Expanded(
           child: RefreshIndicator(
@@ -258,8 +504,9 @@ class _HistoryScreenState extends State<HistoryScreen> with SingleTickerProvider
             color: AppColors.primary,
             child: ListView.builder(
               padding: const EdgeInsets.symmetric(vertical: 8),
-              itemCount: history.length,
-              itemBuilder: (context, index) => _buildTradeItem(history[index]),
+              itemCount: filteredHistory.length,
+              itemBuilder: (context, index) =>
+                  _buildTradeItem(filteredHistory[index]),
             ),
           ),
         ),
@@ -278,13 +525,13 @@ class _HistoryScreenState extends State<HistoryScreen> with SingleTickerProvider
     final commission = (trade['commission'] as num?)?.toDouble() ?? 0;
     final closeTime = trade['closeTime'] as int?;
     final accountName = _getAccountName(trade);
-    
-    final displayProfit = widget.includeCommissionSwap 
-        ? profit + swap + commission 
+
+    final displayProfit = widget.includeCommissionSwap
+        ? profit + swap + commission
         : profit;
-    
+
     final isBuy = type == 'BUY';
-    
+
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       padding: const EdgeInsets.all(12),
@@ -295,14 +542,12 @@ class _HistoryScreenState extends State<HistoryScreen> with SingleTickerProvider
       ),
       child: Column(
         children: [
-          // Top row: Symbol, Type, Lots, Profit
+          // Top row: Symbol + Type/Lots, Profit
           Row(
             children: [
-              // Symbol
+              // Symbol and Type/Lots together
               Expanded(
-                flex: 2,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                child: Row(
                   children: [
                     Text(
                       symbol,
@@ -312,82 +557,101 @@ class _HistoryScreenState extends State<HistoryScreen> with SingleTickerProvider
                         fontWeight: FontWeight.bold,
                       ),
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      accountName,
-                      style: const TextStyle(
-                        color: AppColors.textMuted,
-                        fontSize: 11,
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: isBuy
+                            ? AppColors.primary.withOpacity(0.15)
+                            : AppColors.error.withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        '$type ${lots.toStringAsFixed(2)}',
+                        style: TextStyle(
+                          color: isBuy ? AppColors.primary : AppColors.error,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
                   ],
                 ),
               ),
-              
-              // Type & Lots
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: isBuy 
-                      ? AppColors.primary.withOpacity(0.15)
-                      : AppColors.error.withOpacity(0.15),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Text(
-                  '$type ${lots.toStringAsFixed(2)}',
-                  style: TextStyle(
-                    color: isBuy ? AppColors.primary : AppColors.error,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-              
-              const SizedBox(width: 12),
-              
+
               // Profit
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text(
-                    Formatters.formatCurrencyWithSign(displayProfit),
-                    style: TextStyle(
-                      color: displayProfit >= 0 ? AppColors.primary : AppColors.error,
-                      fontSize: 14,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  Text(
-                    _formatDateTime(closeTime),
-                    style: const TextStyle(
-                      color: AppColors.textMuted,
-                      fontSize: 11,
-                    ),
-                  ),
-                ],
+              Text(
+                Formatters.formatCurrencyWithSign(displayProfit),
+                style: TextStyle(
+                  color: displayProfit >= 0
+                      ? AppColors.primary
+                      : AppColors.error,
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ],
           ),
-          
-          const SizedBox(height: 8),
-          
+
+          const SizedBox(height: 6),
+
+          // Middle row: Account and Date/Time
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                accountName,
+                style: const TextStyle(
+                  color: AppColors.textMuted,
+                  fontSize: 11,
+                ),
+              ),
+              Text(
+                _formatDateTime(closeTime),
+                style: const TextStyle(
+                  color: AppColors.textMuted,
+                  fontSize: 11,
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 6),
+
           // Bottom row: Prices
           Row(
             children: [
               Text(
                 'Open: ${_formatPrice(openPrice, symbol)}',
-                style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
+                style: const TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: 12,
+                ),
               ),
               const SizedBox(width: 16),
               Text(
                 'Close: ${_formatPrice(closePrice, symbol)}',
-                style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
+                style: const TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: 12,
+                ),
               ),
-              if (widget.includeCommissionSwap && (swap != 0 || commission != 0)) ...[
+              if (widget.includeCommissionSwap &&
+                  (swap != 0 || commission != 0)) ...[
                 const Spacer(),
                 Text(
-                  'S: ${swap.toStringAsFixed(2)} C: ${commission.toStringAsFixed(2)}',
-                  style: const TextStyle(color: AppColors.textMuted, fontSize: 10),
+                  [
+                    if (swap != 0) 'Swap: ${swap.toStringAsFixed(2)}',
+                    if (commission != 0)
+                      'Comm: ${commission.toStringAsFixed(2)}',
+                  ].join(' '),
+                  style: const TextStyle(
+                    color: AppColors.textMuted,
+                    fontSize: 10,
+                  ),
                 ),
               ],
             ],
@@ -400,8 +664,10 @@ class _HistoryScreenState extends State<HistoryScreen> with SingleTickerProvider
   String _formatPrice(double price, String symbol) {
     // Determine decimal places based on price level
     int decimals = 5;
-    if (price > 1000) decimals = 2;
-    else if (price > 10) decimals = 3;
+    if (price > 1000)
+      decimals = 2;
+    else if (price > 10)
+      decimals = 3;
     return price.toStringAsFixed(decimals);
   }
 }
