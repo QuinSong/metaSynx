@@ -9,7 +9,7 @@ class AccountDetailScreen extends StatefulWidget {
   final Map<String, dynamic> initialAccount;
   final ValueNotifier<List<Map<String, dynamic>>> accountsNotifier;
   final ValueNotifier<List<Map<String, dynamic>>> positionsNotifier;
-  final void Function(int ticket, int terminalIndex) onClosePosition;
+  final void Function(int ticket, int terminalIndex, [double? lots]) onClosePosition;
   final void Function(int ticket, int terminalIndex, double? sl, double? tp) onModifyPosition;
   final void Function(int ticket, int terminalIndex) onCancelOrder;
   final void Function(int ticket, int terminalIndex, double price) onModifyPendingOrder;

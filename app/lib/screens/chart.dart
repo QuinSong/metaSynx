@@ -12,7 +12,7 @@ class ChartScreen extends StatefulWidget {
   final List<Map<String, dynamic>> accounts;
   final String? initialSymbol;
   final int? initialAccountIndex;
-  final void Function(int ticket, int terminalIndex) onClosePosition;
+  final void Function(int ticket, int terminalIndex, [double? lots]) onClosePosition;
   final void Function(int ticket, int terminalIndex, double? sl, double? tp) onModifyPosition;
   final void Function(int ticket, int terminalIndex) onCancelOrder;
   final void Function(int ticket, int terminalIndex, double price) onModifyPendingOrder;

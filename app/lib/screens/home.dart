@@ -318,12 +318,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     });
   }
 
-  void _closePosition(int ticket, int terminalIndex) {
-    _connection.send({
+  void _closePosition(int ticket, int terminalIndex, [double? lots]) {
+    final data = <String, dynamic>{
       'action': 'close_position',
       'ticket': ticket,
       'terminalIndex': terminalIndex,
-    });
+    };
+    if (lots != null) {
+      data['lots'] = lots;
+    }
+    _connection.send(data);
   }
 
   void _modifyPosition(int ticket, int terminalIndex, double? sl, double? tp) {

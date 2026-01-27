@@ -7,7 +7,7 @@ class PositionDetailScreen extends StatefulWidget {
   final Map<String, dynamic> position;
   final ValueNotifier<List<Map<String, dynamic>>> positionsNotifier;
   final List<Map<String, dynamic>> accounts;
-  final void Function(int ticket, int terminalIndex) onClosePosition;
+  final void Function(int ticket, int terminalIndex, [double? lots]) onClosePosition;
   final void Function(int ticket, int terminalIndex, double? sl, double? tp) onModifyPosition;
   final void Function(int ticket, int terminalIndex) onCancelOrder;
   final void Function(int ticket, int terminalIndex, double price) onModifyPendingOrder;
@@ -73,6 +73,7 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
   
   final _slController = TextEditingController();
   final _tpController = TextEditingController();
+  final _lotsController = TextEditingController();
   bool _isProcessing = false;
   int _digits = 5; // Default to 5 decimal places
   
@@ -80,6 +81,9 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
   String _originalSL = '';
   String _originalTP = '';
   bool _hasModifications = false;
+  
+  // Partial close
+  bool _partialClose = false;
 
   @override
   void initState() {
@@ -185,13 +189,13 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
   }
 
   @override
-  @override
   void dispose() {
     widget.positionsNotifier.removeListener(_onPositionsUpdated);
     _slController.removeListener(_checkForModifications);
     _tpController.removeListener(_checkForModifications);
     _slController.dispose();
     _tpController.dispose();
+    _lotsController.dispose();
     super.dispose();
   }
 
@@ -256,6 +260,16 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
       return;
     }
 
+    // Validate partial close lots
+    double? closeLots;
+    if (_partialClose && _lotsController.text.isNotEmpty) {
+      closeLots = double.tryParse(_lotsController.text);
+      if (closeLots == null || closeLots <= 0) {
+        _showError('Invalid lot size');
+        return;
+      }
+    }
+
     // Show confirmation dialog if enabled
     if (widget.confirmBeforeClose) {
       final confirmed = await _showCloseConfirmationDialog();
@@ -264,17 +278,77 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
 
     setState(() => _isProcessing = true);
 
-    // Get all positions to close
-    final positionsToClose = <Map<String, int>>[];
+    // Get all positions to close with their lots
+    final positionsToClose = <Map<String, dynamic>>[];
     
     // First, try to find matching positions
     final matching = _findMatchingPositions();
+    
+    // Get main account for ratio calculations
+    String? mainAccountNum = widget.mainAccountNum;
+    double mainLots = closeLots ?? 0;
+    
+    // If partial close with ratios, find the main account's position lots
+    if (_partialClose && closeLots != null && mainAccountNum != null) {
+      final mainAccount = widget.accounts.firstWhere(
+        (a) => a['account'] == mainAccountNum,
+        orElse: () => <String, dynamic>{},
+      );
+      final mainTerminalIndex = mainAccount['index'] as int?;
+      
+      if (mainTerminalIndex != null) {
+        final mainPos = matching.where((p) => p['terminalIndex'] == mainTerminalIndex).firstOrNull;
+        if (mainPos != null) {
+          final mainPosLots = (mainPos['lots'] as num?)?.toDouble() ?? 0;
+          // Validate that close lots doesn't exceed position lots
+          if (closeLots > mainPosLots) {
+            _showError('Lot size exceeds position size (${mainPosLots.toStringAsFixed(2)})');
+            setState(() => _isProcessing = false);
+            return;
+          }
+          mainLots = closeLots;
+        }
+      }
+    }
+    
     for (final terminalIndex in _selectedTerminalIndices) {
       final pos = matching.where((p) => p['terminalIndex'] == terminalIndex).firstOrNull;
       if (pos != null) {
+        final posLots = (pos['lots'] as num?)?.toDouble() ?? 0;
+        double? lotsToClose;
+        
+        if (_partialClose && closeLots != null) {
+          // Calculate lots based on ratio
+          final account = widget.accounts.firstWhere(
+            (a) => a['index'] == terminalIndex,
+            orElse: () => <String, dynamic>{},
+          );
+          final accountNum = account['account']?.toString() ?? '';
+          final ratio = widget.lotRatios[accountNum] ?? 1.0;
+          
+          if (mainAccountNum != null && accountNum == mainAccountNum) {
+            // Main account uses the entered lots directly
+            lotsToClose = closeLots;
+          } else if (mainAccountNum != null && widget.lotRatios.isNotEmpty) {
+            // Apply ratio for non-main accounts
+            lotsToClose = (mainLots * ratio).clamp(0.01, posLots);
+            // Round to 2 decimal places
+            lotsToClose = (lotsToClose * 100).round() / 100;
+          } else {
+            // No ratios configured, use entered lots
+            lotsToClose = closeLots;
+          }
+          
+          // Ensure we don't exceed position lots
+          if (lotsToClose > posLots) {
+            lotsToClose = posLots;
+          }
+        }
+        
         positionsToClose.add({
           'ticket': pos['ticket'] as int,
           'terminalIndex': terminalIndex,
+          'lots': lotsToClose,
         });
       }
     }
@@ -283,9 +357,22 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
     if (positionsToClose.isEmpty) {
       final origTerminal = widget.position['terminalIndex'] as int;
       if (_selectedTerminalIndices.contains(origTerminal)) {
+        final origLots = (widget.position['lots'] as num?)?.toDouble() ?? 0;
+        double? lotsToClose;
+        
+        if (_partialClose && closeLots != null) {
+          if (closeLots > origLots) {
+            _showError('Lot size exceeds position size (${origLots.toStringAsFixed(2)})');
+            setState(() => _isProcessing = false);
+            return;
+          }
+          lotsToClose = closeLots;
+        }
+        
         positionsToClose.add({
           'ticket': widget.position['ticket'] as int,
           'terminalIndex': origTerminal,
+          'lots': lotsToClose,
         });
       }
     }
@@ -298,17 +385,33 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
 
     // Send all close commands
     for (final item in positionsToClose) {
-      widget.onClosePosition(item['ticket']!, item['terminalIndex']!);
+      widget.onClosePosition(
+        item['ticket'] as int, 
+        item['terminalIndex'] as int,
+        item['lots'] as double?,
+      );
     }
 
     if (mounted) {
+      final message = _partialClose && closeLots != null
+          ? 'Partially closing ${positionsToClose.length} position(s)'
+          : 'Closing ${positionsToClose.length} position(s)';
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Closing ${positionsToClose.length} position(s)'),
+          content: Text(message),
           backgroundColor: AppColors.primary,
         ),
       );
-      Navigator.pop(context);
+      if (!_partialClose || closeLots == null) {
+        Navigator.pop(context);
+      } else {
+        // For partial close, stay on screen and reset
+        setState(() {
+          _isProcessing = false;
+          _partialClose = false;
+          _lotsController.clear();
+        });
+      }
     }
   }
 
@@ -1108,6 +1211,108 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
 
                 const SizedBox(height: 16),
 
+                // Partial close section
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: AppColors.surface,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: _partialClose ? AppColors.error.withOpacity(0.5) : AppColors.border,
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          GestureDetector(
+                            onTap: () {
+                              setState(() {
+                                _partialClose = !_partialClose;
+                                if (!_partialClose) {
+                                  _lotsController.clear();
+                                }
+                              });
+                            },
+                            child: Row(
+                              children: [
+                                Icon(
+                                  _partialClose ? Icons.check_box : Icons.check_box_outline_blank,
+                                  color: _partialClose ? AppColors.error : AppColors.textSecondary,
+                                  size: 22,
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  'Partial Close',
+                                  style: TextStyle(
+                                    color: _partialClose ? Colors.white : AppColors.textSecondary,
+                                    fontSize: 14,
+                                    fontWeight: _partialClose ? FontWeight.w600 : FontWeight.normal,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const Spacer(),
+                          Text(
+                            'Max: ${lots.toStringAsFixed(2)}',
+                            style: const TextStyle(
+                              color: AppColors.textMuted,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (_partialClose) ...[
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                controller: _lotsController,
+                                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                style: const TextStyle(color: Colors.white),
+                                decoration: InputDecoration(
+                                  hintText: 'Lots to close',
+                                  hintStyle: TextStyle(color: AppColors.textSecondary.withOpacity(0.5)),
+                                  filled: true,
+                                  fillColor: AppColors.background,
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                    borderSide: BorderSide.none,
+                                  ),
+                                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            // Quick buttons for common percentages
+                            _buildQuickLotButton('25%', lots * 0.25),
+                            const SizedBox(width: 4),
+                            _buildQuickLotButton('50%', lots * 0.50),
+                            const SizedBox(width: 4),
+                            _buildQuickLotButton('75%', lots * 0.75),
+                          ],
+                        ),
+                        if (widget.lotRatios.isNotEmpty && _selectedTerminalIndices.length > 1) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            'Lot ratios will be applied to other accounts',
+                            style: TextStyle(
+                              color: AppColors.textMuted,
+                              fontSize: 11,
+                              fontStyle: FontStyle.italic,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 16),
+
                 // Close button - disabled if SL/TP has been modified
                 SizedBox(
                   width: double.infinity,
@@ -1124,7 +1329,9 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
                     child: _isProcessing
                         ? const CircularProgressIndicator(color: Colors.white)
                         : Text(
-                            'CLOSE ${_selectedTerminalIndices.length} ${_getPositionTypeLabel()}',
+                            _partialClose && _lotsController.text.isNotEmpty
+                                ? 'PARTIAL CLOSE ${_selectedTerminalIndices.length} ${_getPositionTypeLabel()}'
+                                : 'CLOSE ${_selectedTerminalIndices.length} ${_getPositionTypeLabel()}',
                             style: TextStyle(
                               color: _hasModifications ? Colors.white.withOpacity(0.5) : Colors.white,
                               fontSize: 16,
@@ -1138,6 +1345,34 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
           );
         },
       ),
+      ),
+    );
+  }
+
+  Widget _buildQuickLotButton(String label, double value) {
+    // Round to 2 decimal places, minimum 0.01
+    final roundedValue = (value * 100).round() / 100;
+    final displayValue = roundedValue < 0.01 ? 0.01 : roundedValue;
+    
+    return GestureDetector(
+      onTap: () {
+        _lotsController.text = displayValue.toStringAsFixed(2);
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+        decoration: BoxDecoration(
+          color: AppColors.background,
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Text(
+          label,
+          style: const TextStyle(
+            color: AppColors.textSecondary,
+            fontSize: 11,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
       ),
     );
   }
