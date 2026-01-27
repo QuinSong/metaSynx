@@ -509,6 +509,8 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
     final formattedType = _formatOrderType(type);
     final isBuy = type.toLowerCase().contains('buy');
     final digits = _detectDigits(openPrice);
+    // Buy limit/stop uses ask, sell limit/stop uses bid
+    final priceLabel = isBuy ? 'Current (Ask)' : 'Current (Bid)';
     
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
@@ -554,7 +556,7 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
               const Spacer(),
               // Lots
               Text(
-                'Lots ${lots.toStringAsFixed(2)}',
+                '${lots.toStringAsFixed(2)} lots',
                 style: const TextStyle(
                   color: Colors.white,
                   fontSize: 13,
@@ -595,9 +597,9 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'Current',
-                    style: TextStyle(
+                  Text(
+                    priceLabel,
+                    style: const TextStyle(
                       color: AppColors.textMuted,
                       fontSize: 10,
                     ),
@@ -605,7 +607,7 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
                   Text(
                     currentPrice.toStringAsFixed(digits),
                     style: const TextStyle(
-                      color: AppColors.textSecondary,
+                      color: Colors.white,
                       fontSize: 13,
                       fontWeight: FontWeight.w500,
                     ),
@@ -653,105 +655,323 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
     );
   }
 
+  // Find similar pending orders across ALL accounts (same symbol, type, price)
+  List<Map<String, dynamic>> _findSimilarPendingOrders(Map<String, dynamic> order) {
+    final symbol = order['symbol']?.toString() ?? '';
+    final type = order['type']?.toString() ?? '';
+    final openPrice = (order['openPrice'] as num?)?.toDouble() ?? 0;
+    
+    return widget.positionsNotifier.value.where((p) {
+      if (p['isPending'] != true) return false;
+      if (p['symbol']?.toString() != symbol) return false;
+      if (p['type']?.toString() != type) return false;
+      // Match orders with same price (within small tolerance)
+      final pPrice = (p['openPrice'] as num?)?.toDouble() ?? 0;
+      return (pPrice - openPrice).abs() < 0.00001;
+    }).toList();
+  }
+
+  String _getAccountNameForIndex(int terminalIndex) {
+    final account = widget.accountsNotifier.value.firstWhere(
+      (a) => a['index'] == terminalIndex,
+      orElse: () => <String, dynamic>{},
+    );
+    final accountNum = account['account']?.toString() ?? '';
+    return _getAccountDisplayName(accountNum);
+  }
+
   void _showCancelOrderConfirmation(int ticket, int terminalIndex, String symbol, String type) {
+    // Find the order
+    final order = widget.positionsNotifier.value.firstWhere(
+      (p) => p['ticket'] == ticket,
+      orElse: () => <String, dynamic>{},
+    );
+    
+    if (order.isEmpty) return;
+    
+    // Find similar orders across all accounts
+    final similarOrders = _findSimilarPendingOrders(order);
+    final selectedOrders = <int>{ticket};  // Pre-select current order
+    
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: AppColors.surface,
-        title: const Text('Cancel Order', style: TextStyle(color: Colors.white)),
-        content: Text(
-          'Cancel $type order on $symbol?',
-          style: const TextStyle(color: AppColors.textSecondary),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('No', style: TextStyle(color: AppColors.textSecondary)),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: AppColors.surface,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: const BorderSide(color: AppColors.primary, width: 1),
           ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              widget.onCancelOrder(ticket, terminalIndex);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Cancelling order...'),
-                  backgroundColor: AppColors.primary,
+          title: const Text('Cancel Order', style: TextStyle(color: Colors.white)),
+          content: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(context).size.height * 0.5,
+              maxWidth: MediaQuery.of(context).size.width * 0.9,
+            ),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    similarOrders.length > 1 ? 'Accounts' : 'Account',
+                    style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
+                  ),
+                  const SizedBox(height: 8),
+                  ...similarOrders.map((o) {
+                    final oTicket = o['ticket'] as int? ?? 0;
+                    final oTerminalIndex = o['terminalIndex'] as int? ?? 0;
+                    final accountName = _getAccountNameForIndex(oTerminalIndex);
+                    final lots = (o['lots'] as num?)?.toDouble() ?? 0;
+                    final isSelected = selectedOrders.contains(oTicket);
+                    
+                    return GestureDetector(
+                      onTap: () {
+                        setDialogState(() {
+                          if (isSelected) {
+                            selectedOrders.remove(oTicket);
+                          } else {
+                            selectedOrders.add(oTicket);
+                          }
+                        });
+                      },
+                      child: Container(
+                        margin: const EdgeInsets.only(bottom: 6),
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: isSelected ? AppColors.error.withOpacity(0.15) : AppColors.background,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: isSelected ? AppColors.error : AppColors.border,
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              isSelected ? Icons.check_box : Icons.check_box_outline_blank,
+                              color: isSelected ? AppColors.error : AppColors.textSecondary,
+                              size: 20,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                accountName,
+                                style: TextStyle(
+                                  color: isSelected ? Colors.white : AppColors.textSecondary,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ),
+                            Text(
+                              '${lots.toStringAsFixed(2)} lots',
+                              style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  }),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Cancel ${_formatOrderType(type)} order on $symbol?',
+                    style: const TextStyle(color: AppColors.textSecondary),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('No', style: TextStyle(color: AppColors.textSecondary)),
+            ),
+            TextButton(
+              onPressed: selectedOrders.isEmpty ? null : () {
+                Navigator.pop(context);
+                
+                // Cancel all selected orders
+                for (final o in similarOrders) {
+                  final oTicket = o['ticket'] as int? ?? 0;
+                  if (selectedOrders.contains(oTicket)) {
+                    final oTerminalIndex = o['terminalIndex'] as int? ?? 0;
+                    widget.onCancelOrder(oTicket, oTerminalIndex);
+                  }
+                }
+                
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Cancelling ${selectedOrders.length} order(s)...'),
+                    backgroundColor: AppColors.primary,
+                  ),
+                );
+              },
+              child: Text(
+                'Yes, Cancel${selectedOrders.length > 1 ? ' (${selectedOrders.length})' : ''}',
+                style: TextStyle(
+                  color: selectedOrders.isEmpty ? AppColors.textMuted : AppColors.error,
                 ),
-              );
-            },
-            child: const Text('Yes, Cancel', style: TextStyle(color: AppColors.error)),
-          ),
-        ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 
   void _showEditPendingOrderDialog(Map<String, dynamic> order) {
     final ticket = order['ticket'] as int? ?? 0;
-    final terminalIndex = order['terminalIndex'] as int? ?? 0;
     final symbol = order['symbol'] as String? ?? '';
     final openPrice = (order['openPrice'] as num?)?.toDouble() ?? 0;
     final digits = _detectDigits(openPrice);
+    
+    // Find similar orders across all accounts
+    final similarOrders = _findSimilarPendingOrders(order);
+    final selectedOrders = <int>{ticket};  // Pre-select current order
     
     final priceController = TextEditingController(text: openPrice.toStringAsFixed(digits));
     
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: AppColors.surface,
-        title: Text('Edit Order - $symbol', style: const TextStyle(color: Colors.white)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('New Price', style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
-            const SizedBox(height: 8),
-            TextField(
-              controller: priceController,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              style: const TextStyle(color: Colors.white),
-              decoration: InputDecoration(
-                filled: true,
-                fillColor: AppColors.background,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide.none,
-                ),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: AppColors.surface,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: const BorderSide(color: AppColors.primary, width: 1),
+          ),
+          title: Text('Edit Order - $symbol', style: const TextStyle(color: Colors.white)),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Account selection
+                  Text(
+                    similarOrders.length > 1 ? 'Accounts' : 'Account',
+                    style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
+                  ),
+                  const SizedBox(height: 8),
+                  ...similarOrders.map((o) {
+                    final oTicket = o['ticket'] as int? ?? 0;
+                    final oTerminalIndex = o['terminalIndex'] as int? ?? 0;
+                    final accountName = _getAccountNameForIndex(oTerminalIndex);
+                    final lots = (o['lots'] as num?)?.toDouble() ?? 0;
+                    final isSelected = selectedOrders.contains(oTicket);
+                    
+                    return GestureDetector(
+                      onTap: () {
+                        setDialogState(() {
+                          if (isSelected) {
+                            selectedOrders.remove(oTicket);
+                          } else {
+                            selectedOrders.add(oTicket);
+                          }
+                        });
+                      },
+                      child: Container(
+                        margin: const EdgeInsets.only(bottom: 6),
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: isSelected ? AppColors.primary.withOpacity(0.15) : AppColors.background,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: isSelected ? AppColors.primary : AppColors.border,
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              isSelected ? Icons.check_box : Icons.check_box_outline_blank,
+                              color: isSelected ? AppColors.primary : AppColors.textSecondary,
+                              size: 20,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                accountName,
+                                style: TextStyle(
+                                  color: isSelected ? Colors.white : AppColors.textSecondary,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ),
+                            Text(
+                              '${lots.toStringAsFixed(2)} lots',
+                              style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  }),
+                  const SizedBox(height: 16),
+                  const Text('New Price', style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: priceController,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    style: const TextStyle(color: Colors.white),
+                    decoration: InputDecoration(
+                      filled: true,
+                      fillColor: AppColors.background,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide.none,
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                    ),
+                    autofocus: similarOrders.length == 1,
+                  ),
+                ],
               ),
-              autofocus: true,
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel', style: TextStyle(color: AppColors.textSecondary)),
+            ),
+            TextButton(
+              onPressed: selectedOrders.isEmpty ? null : () {
+                final newPrice = double.tryParse(priceController.text);
+                if (newPrice == null || newPrice <= 0) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Invalid price'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                  return;
+                }
+                Navigator.pop(context);
+                
+                // Modify all selected orders
+                for (final o in similarOrders) {
+                  final oTicket = o['ticket'] as int? ?? 0;
+                  if (selectedOrders.contains(oTicket)) {
+                    final oTerminalIndex = o['terminalIndex'] as int? ?? 0;
+                    widget.onModifyPendingOrder(oTicket, oTerminalIndex, newPrice);
+                  }
+                }
+                
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Modifying ${selectedOrders.length} order(s)...'),
+                    backgroundColor: AppColors.primary,
+                  ),
+                );
+              },
+              child: Text(
+                'Update${selectedOrders.length > 1 ? ' (${selectedOrders.length})' : ''}',
+                style: TextStyle(
+                  color: selectedOrders.isEmpty ? AppColors.textMuted : AppColors.primary,
+                ),
+              ),
             ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel', style: TextStyle(color: AppColors.textSecondary)),
-          ),
-          TextButton(
-            onPressed: () {
-              final newPrice = double.tryParse(priceController.text);
-              if (newPrice == null || newPrice <= 0) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Invalid price'),
-                    backgroundColor: Colors.red,
-                  ),
-                );
-                return;
-              }
-              Navigator.pop(context);
-              widget.onModifyPendingOrder(ticket, terminalIndex, newPrice);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Modifying order...'),
-                  backgroundColor: AppColors.primary,
-                ),
-              );
-            },
-            child: const Text('Update', style: TextStyle(color: AppColors.primary)),
-          ),
-        ],
       ),
     );
   }
@@ -1124,6 +1344,8 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
           accounts: widget.accountsNotifier.value,
           onClosePosition: widget.onClosePosition,
           onModifyPosition: widget.onModifyPosition,
+          onCancelOrder: widget.onCancelOrder,
+          onModifyPendingOrder: widget.onModifyPendingOrder,
           accountNames: widget.accountNames,
           mainAccountNum: widget.mainAccountNum,
           includeCommissionSwap: widget.includeCommissionSwap,

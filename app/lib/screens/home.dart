@@ -629,6 +629,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           accounts: _accountsNotifier.value,
           onClosePosition: _closePosition,
           onModifyPosition: _modifyPosition,
+          onCancelOrder: _cancelOrder,
+          onModifyPendingOrder: _modifyPendingOrder,
           accountNames: _accountNames,
           mainAccountNum: _mainAccountNum,
           includeCommissionSwap: _includeCommissionSwap,

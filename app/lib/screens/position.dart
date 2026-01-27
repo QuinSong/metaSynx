@@ -9,6 +9,8 @@ class PositionDetailScreen extends StatefulWidget {
   final List<Map<String, dynamic>> accounts;
   final void Function(int ticket, int terminalIndex) onClosePosition;
   final void Function(int ticket, int terminalIndex, double? sl, double? tp) onModifyPosition;
+  final void Function(int ticket, int terminalIndex) onCancelOrder;
+  final void Function(int ticket, int terminalIndex, double price) onModifyPendingOrder;
   final Map<String, String> accountNames;
   final String? mainAccountNum;
   final bool includeCommissionSwap;
@@ -41,6 +43,8 @@ class PositionDetailScreen extends StatefulWidget {
     required this.accounts,
     required this.onClosePosition,
     required this.onModifyPosition,
+    required this.onCancelOrder,
+    required this.onModifyPendingOrder,
     required this.accountNames,
     this.mainAccountNum,
     required this.includeCommissionSwap,
@@ -552,6 +556,8 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
           initialSymbol: symbol,
           onClosePosition: widget.onClosePosition,
           onModifyPosition: widget.onModifyPosition,
+          onCancelOrder: widget.onCancelOrder,
+          onModifyPendingOrder: widget.onModifyPendingOrder,
           accountNames: widget.accountNames,
           mainAccountNum: widget.mainAccountNum,
           includeCommissionSwap: widget.includeCommissionSwap,
