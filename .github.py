@@ -2,7 +2,7 @@ import os
 import time
 
 
-msg = '1st back to ppoll mt4 candle data attempt'
+msg = 'make get_chart_data async'
 
 
 os.system('git add .')

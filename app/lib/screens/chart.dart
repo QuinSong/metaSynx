@@ -75,6 +75,9 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
   Timer? _chartPollTimer;
   StreamSubscription<Map<String, dynamic>>? _chartDataSubscription;
   bool _isAppInForeground = true; // Track if app is in foreground
+  bool _showBidAskLines = false; // B/A toggle
+  double? _currentBid;
+  double? _currentAsk;
   
   // Search overlay
   bool _showSearchOverlay = false;
@@ -108,11 +111,22 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
     // Register for app lifecycle changes
     WidgetsBinding.instance.addObserver(this);
     
+    // Listen for position changes to update lines on chart
+    widget.positionsNotifier.addListener(_onPositionsChanged);
+    
     // Initialize WebView controller first (synchronous)
     _initWebView();
     
     // Then load preferences (async)
     _loadSavedPreferences();
+  }
+  
+  void _onPositionsChanged() {
+    // Update position lines on the chart when positions change
+    if (_hasReceivedData) {
+      final positionsJson = _buildPositionsJson();
+      _controller.runJavaScript('updatePositions($positionsJson);');
+    }
   }
 
   @override
@@ -145,9 +159,13 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
     final savedAccountIndex = prefs.getInt('chart_account_index');
     final savedSymbol = prefs.getString('chart_symbol');
     final savedTimeframe = prefs.getString('chart_timeframe');
+    final savedShowBidAsk = prefs.getBool('chart_show_bid_ask') ?? false;
     
     // Load recent searches
     _recentSearches = prefs.getStringList('chart_recent_searches') ?? [];
+    
+    // Load B/A preference
+    _showBidAskLines = savedShowBidAsk;
     
     // Validate and set account index
     if (savedAccountIndex != null && savedAccountIndex < widget.accounts.length) {
@@ -214,6 +232,7 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
     }
     await prefs.setString('chart_symbol', _currentSymbol);
     await prefs.setString('chart_timeframe', _currentInterval);
+    await prefs.setBool('chart_show_bid_ask', _showBidAskLines);
   }
 
   void _initWebView() {
@@ -263,6 +282,11 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
     // Chart is initialized, now start polling for data from MT4
     if (_useMT4Data && _selectedAccountIndex != null) {
       _hasReceivedData = false;
+      
+      // Apply saved B/A preference
+      if (_showBidAskLines) {
+        _controller.runJavaScript('showBidAskLines(null, null);');
+      }
       
       // Request initial chart data
       widget.onRequestChartData!(_currentSymbol, _currentInterval, _selectedAccountIndex!);
@@ -317,6 +341,19 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
     if (dataSymbol != null && dataSymbol != _currentSymbol) return;
     if (dataTimeframe != null && dataTimeframe != _currentInterval) return;
     
+    // Extract bid/ask
+    final bid = data['bid'];
+    final ask = data['ask'];
+    if (bid != null && ask != null) {
+      _currentBid = (bid is num) ? bid.toDouble() : double.tryParse(bid.toString());
+      _currentAsk = (ask is num) ? ask.toDouble() : double.tryParse(ask.toString());
+      
+      // Always update bid/ask (this updates spread display and lines if visible)
+      if (_currentBid != null && _currentAsk != null) {
+        _controller.runJavaScript('updateBidAsk($_currentBid, $_currentAsk);');
+      }
+    }
+    
     final candles = data['candles'] as List?;
     if (candles != null && candles.isNotEmpty) {
       final candlesJson = _candlesToJson(candles);
@@ -359,6 +396,9 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
     
     if (position.isEmpty) return;
     
+    // Stop polling while on another screen
+    _stopChartPolling();
+    
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -380,7 +420,12 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
           onPlaceOrder: widget.onPlaceOrder,
         ),
       ),
-    );
+    ).then((_) {
+      // Resume polling when returning to chart
+      if (mounted && _isAppInForeground) {
+        _startChartPolling();
+      }
+    });
   }
 
   double _parseDouble(dynamic value) {
@@ -428,7 +473,6 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
     if (positions.isEmpty) return '';
     
     final lines = StringBuffer();
-    lines.writeln('positionPrices = [];');
     
     for (int i = 0; i < positions.length; i++) {
       final pos = positions[i];
@@ -437,54 +481,72 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
       final sl = _parseDouble(pos['sl']);
       final tp = _parseDouble(pos['tp']);
       final lots = _parseDouble(pos['lots']);
-      final ticket = _parseInt(pos['ticket']);
       final isBuy = type == 'buy';
       final entryColor = isBuy ? '#00D4AA' : '#FF5252';
       
-      lines.writeln('positionPrices.push({ ticket: $ticket, price: $openPrice });');
-      
-      // Entry line
+      // Entry line - store reference
       lines.writeln('''
-        series.createPriceLine({
+        positionLines.push(series.createPriceLine({
           price: $openPrice,
           color: '$entryColor',
           lineWidth: 2,
           lineStyle: 0,
           axisLabelVisible: true,
           title: '${isBuy ? "BUY" : "SELL"} ${lots.toStringAsFixed(2)}',
-        });
+        }));
       ''');
       
       // SL line
       if (sl > 0) {
         lines.writeln('''
-          series.createPriceLine({
+          positionLines.push(series.createPriceLine({
             price: $sl,
             color: '#FF5252',
             lineWidth: 1,
             lineStyle: 2,
             axisLabelVisible: true,
             title: 'SL',
-          });
+          }));
         ''');
       }
       
       // TP line
       if (tp > 0) {
         lines.writeln('''
-          series.createPriceLine({
+          positionLines.push(series.createPriceLine({
             price: $tp,
             color: '#00D4AA',
             lineWidth: 1,
             lineStyle: 2,
             axisLabelVisible: true,
             title: 'TP',
-          });
+          }));
         ''');
       }
     }
     
     return lines.toString();
+  }
+  
+  String _buildPositionsJson() {
+    final positions = _getPositionsForSymbol();
+    if (positions.isEmpty) return '[]';
+    
+    final buffer = StringBuffer('[');
+    for (int i = 0; i < positions.length; i++) {
+      if (i > 0) buffer.write(',');
+      final pos = positions[i];
+      final type = (pos['type']?.toString() ?? '').toLowerCase();
+      final openPrice = _parseDouble(pos['openPrice']);
+      final sl = _parseDouble(pos['sl']);
+      final tp = _parseDouble(pos['tp']);
+      final lots = _parseDouble(pos['lots']);
+      final ticket = _parseInt(pos['ticket']);
+      final isBuy = type == 'buy';
+      buffer.write('{"ticket":$ticket,"openPrice":$openPrice,"sl":$sl,"tp":$tp,"lots":$lots,"isBuy":$isBuy}');
+    }
+    buffer.write(']');
+    return buffer.toString();
   }
 
   String _getBrokerName() {
@@ -591,6 +653,20 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
       color: #00D4AA;
       font-weight: 600;
     }
+    #spread-label {
+      position: absolute;
+      top: 48px;
+      left: 95px;
+      color: #9CA3AF;
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+      font-size: 12px;
+      font-weight: 500;
+      background: rgba(30, 30, 30, 0.9);
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      z-index: 10;
+    }
   </style>
 </head>
 <body>
@@ -606,6 +682,7 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
       <polyline points="6 9 12 15 18 9"></polyline>
     </svg>
   </div>
+  <div id="spread-label">--</div>
   <div id="timeframe-dropdown">
     ${_buildTimeframeOptionsHtml()}
   </div>
@@ -662,6 +739,7 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
     }
     
     let positionPrices = [];
+    let positionLines = [];
     let lastPrice = 0;
     
     const chart = LightweightCharts.createChart(document.getElementById('chart'), {
@@ -806,6 +884,154 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
       lastPrice = candle.close;
     }
     
+    // Bid/Ask price lines
+    let bidLine = null;
+    let askLine = null;
+    let bidAskVisible = false;
+    let currentBid = null;
+    let currentAsk = null;
+    
+    function showBidAskLines(bid, ask) {
+      bidAskVisible = true;
+      if (bid) currentBid = bid;
+      if (ask) currentAsk = ask;
+      
+      // Hide the default price line
+      series.applyOptions({
+        lastValueVisible: false,
+        priceLineVisible: false,
+      });
+      
+      if (currentBid && currentAsk) {
+        updateBidAskLines(currentBid, currentAsk);
+      }
+    }
+    
+    function hideBidAskLines() {
+      bidAskVisible = false;
+      // Remove bid/ask lines
+      if (bidLine) {
+        series.removePriceLine(bidLine);
+        bidLine = null;
+      }
+      if (askLine) {
+        series.removePriceLine(askLine);
+        askLine = null;
+      }
+      // Show the default price line again
+      series.applyOptions({
+        lastValueVisible: true,
+        priceLineVisible: true,
+      });
+    }
+    
+    function updateBidAsk(bid, ask) {
+      currentBid = bid;
+      currentAsk = ask;
+      
+      // Update spread display
+      if (bid && ask && bid > 0) {
+        // Calculate spread in points
+        const spread = ask - bid;
+        // Determine pip size based on price level
+        let pipSize = 0.0001; // Default for most forex
+        if (bid > 10) pipSize = 0.01; // Indices, JPY pairs
+        else if (bid < 0.1) pipSize = 0.00001; // Some crypto
+        
+        const spreadPips = Math.round(spread / pipSize);
+        document.getElementById('spread-label').textContent = 'Spread ' + spreadPips;
+      }
+      
+      if (bidAskVisible) {
+        updateBidAskLines(bid, ask);
+      }
+    }
+    
+    function updateBidAskLines(bid, ask) {
+      if (!bid || !ask) return;
+      
+      // Remove existing lines
+      if (bidLine) {
+        series.removePriceLine(bidLine);
+      }
+      if (askLine) {
+        series.removePriceLine(askLine);
+      }
+      
+      // Create new lines
+      bidLine = series.createPriceLine({
+        price: bid,
+        color: '#FF5252',
+        lineWidth: 1,
+        lineStyle: 2, // Dashed
+        axisLabelVisible: true,
+        title: '',
+      });
+      
+      askLine = series.createPriceLine({
+        price: ask,
+        color: '#00D4AA',
+        lineWidth: 1,
+        lineStyle: 2, // Dashed
+        axisLabelVisible: true,
+        title: '',
+      });
+    }
+    
+    // Update position lines - removes old ones and creates new ones
+    function updatePositions(positions) {
+      // Remove all existing position lines
+      for (const line of positionLines) {
+        try {
+          series.removePriceLine(line);
+        } catch (e) {}
+      }
+      positionLines = [];
+      positionPrices = [];
+      
+      // Create new position lines
+      for (const pos of positions) {
+        const entryColor = pos.isBuy ? '#00D4AA' : '#FF5252';
+        const lotsStr = pos.lots.toFixed(2);
+        
+        positionPrices.push({ ticket: pos.ticket, price: pos.openPrice });
+        
+        // Entry line
+        positionLines.push(series.createPriceLine({
+          price: pos.openPrice,
+          color: entryColor,
+          lineWidth: 2,
+          lineStyle: 0,
+          axisLabelVisible: true,
+          title: (pos.isBuy ? 'BUY ' : 'SELL ') + lotsStr,
+        }));
+        
+        // SL line
+        if (pos.sl > 0) {
+          positionLines.push(series.createPriceLine({
+            price: pos.sl,
+            color: '#FF5252',
+            lineWidth: 1,
+            lineStyle: 2,
+            axisLabelVisible: true,
+            title: 'SL',
+          }));
+        }
+        
+        // TP line
+        if (pos.tp > 0) {
+          positionLines.push(series.createPriceLine({
+            price: pos.tp,
+            color: '#00D4AA',
+            lineWidth: 1,
+            lineStyle: 2,
+            axisLabelVisible: true,
+            title: 'TP',
+          }));
+        }
+      }
+    }
+    
     // Show loading state
     document.getElementById('loading').style.display = 'block';
     
@@ -842,6 +1068,8 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
       _currentSymbol = symbol;
       _isLoading = true;
       _hasReceivedData = false;
+      _currentBid = null;
+      _currentAsk = null;
     });
     
     _savePreferences();
@@ -868,7 +1096,30 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
     _loadChart();
   }
   
+  void _toggleBidAskLines() {
+    setState(() {
+      _showBidAskLines = !_showBidAskLines;
+    });
+    
+    // Save preference
+    _savePreferences();
+    
+    if (_showBidAskLines) {
+      // Show bid/ask lines with current values if available
+      if (_currentBid != null && _currentAsk != null) {
+        _controller.runJavaScript('showBidAskLines($_currentBid, $_currentAsk);');
+      } else {
+        _controller.runJavaScript('showBidAskLines(null, null);');
+      }
+    } else {
+      _controller.runJavaScript('hideBidAskLines();');
+    }
+  }
+  
   void _openNewOrder(String orderType) {
+    // Stop polling while on another screen
+    _stopChartPolling();
+    
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -884,7 +1135,12 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
           onPlaceOrder: widget.onPlaceOrder,
         ),
       ),
-    );
+    ).then((_) {
+      // Resume polling when returning to chart
+      if (mounted && _isAppInForeground) {
+        _startChartPolling();
+      }
+    });
   }
   
   Future<void> _addToRecentSearches(String symbol) async {
@@ -1018,6 +1274,8 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
   void dispose() {
     // Remove lifecycle observer
     WidgetsBinding.instance.removeObserver(this);
+    // Remove position listener
+    widget.positionsNotifier.removeListener(_onPositionsChanged);
     // Stop polling - this is all we need now (no more subscribe/unsubscribe)
     _stopChartPolling();
     _chartDataSubscription?.cancel();
@@ -1195,6 +1453,45 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
                             child: CircularProgressIndicator(color: AppColors.primary),
                           ),
                         ),
+                      // B/A toggle - top right
+                      Positioned(
+                        top: 10,
+                        right: 10,
+                        child: GestureDetector(
+                          onTap: _toggleBidAskLines,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: AppColors.surface,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: _showBidAskLines 
+                                    ? AppColors.primary 
+                                    : AppColors.border,
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  _showBidAskLines ? Icons.check_box : Icons.check_box_outline_blank,
+                                  color: _showBidAskLines ? AppColors.primary : AppColors.textSecondary,
+                                  size: 16,
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  'B/A',
+                                  style: TextStyle(
+                                    color: _showBidAskLines ? AppColors.primary : AppColors.textSecondary,
+                                    fontSize: 12,
+                                    fontWeight: _showBidAskLines ? FontWeight.bold : FontWeight.w500,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
                       // Buy/Sell buttons at bottom (hidden when keyboard is open)
                       if (MediaQuery.of(context).viewInsets.bottom == 0)
                         Positioned(

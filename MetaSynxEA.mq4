@@ -252,11 +252,15 @@ void WritePositions()
 void WriteChartData(string symbol, int timeframe, int count)
 {
    int digits = (int)MarketInfo(symbol, MODE_DIGITS);
+   double bid = MarketInfo(symbol, MODE_BID);
+   double ask = MarketInfo(symbol, MODE_ASK);
    
    string json = "{";
    json += "\"type\":\"history\",";
    json += "\"symbol\":\"" + symbol + "\",";
    json += "\"timeframe\":" + IntegerToString(timeframe) + ",";
+   json += "\"bid\":" + DoubleToString(bid, digits) + ",";
+   json += "\"ask\":" + DoubleToString(ask, digits) + ",";
    json += "\"candles\":[";
    
    int available = iBars(symbol, timeframe);

@@ -211,13 +211,18 @@ class _HomeScreenState extends State<HomeScreen> {
     _addLog('Modify command sent for ticket=$ticket');
   }
 
-  Future<void> _handleGetChartData(Map<String, dynamic> message) async {
+  void _handleGetChartData(Map<String, dynamic> message) {
     final symbol = message['symbol'] as String?;
     final timeframe = message['timeframe'] as String?;
     final terminalIndex = message['terminalIndex'] as int? ?? 0;
     
     if (symbol == null || timeframe == null) return;
     
+    // Fire and forget - don't block message processing
+    _fetchAndSendChartData(symbol, timeframe, terminalIndex);
+  }
+  
+  Future<void> _fetchAndSendChartData(String symbol, String timeframe, int terminalIndex) async {
     final data = await _eaService.getChartData(symbol, timeframe, terminalIndex);
     if (data != null) {
       _connection?.send({

@@ -213,17 +213,14 @@ class EAService {
   }
 
   /// Get chart data - sends command to EA and reads response
+  /// This is fire-and-forget to avoid blocking other commands
   Future<Map<String, dynamic>?> getChartData(String symbol, String timeframe, int terminalIndex) async {
     if (_commonDataPath == null) return null;
     
-    // Send get_chart_data command to EA
-    await sendCommandToTerminal(terminalIndex, {
-      'action': 'get_chart_data',
-      'symbol': symbol,
-      'timeframe': timeframe,
-    });
+    // Send get_chart_data command to EA - fire and forget, don't wait
+    _sendChartCommandAsync(terminalIndex, symbol, timeframe);
     
-    // Read the chart file
+    // Read the existing chart file (may be from previous request)
     final filePath = '$_commonDataPath\\Files\\$_bridgeFolder\\chart_$terminalIndex.json';
     final file = File(filePath);
     
@@ -235,6 +232,31 @@ class EAService {
       return jsonDecode(content) as Map<String, dynamic>;
     } catch (e) {
       return null;
+    }
+  }
+  
+  /// Send chart command without waiting - fire and forget
+  void _sendChartCommandAsync(int terminalIndex, String symbol, String timeframe) async {
+    if (_commonDataPath == null) return;
+    
+    final filePath = '$_commonDataPath\\Files\\$_bridgeFolder\\command_$terminalIndex.json';
+    final file = File(filePath);
+    
+    // Only write if no command is pending (file doesn't exist)
+    // This prevents chart requests from overwriting trading commands
+    if (await file.exists()) return;
+    
+    try {
+      final command = {
+        'action': 'get_chart_data',
+        'symbol': symbol,
+        'timeframe': timeframe,
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+        'cmdId': '${DateTime.now().millisecondsSinceEpoch}_$terminalIndex',
+      };
+      await file.writeAsString(jsonEncode(command));
+    } catch (e) {
+      // Ignore errors - chart data is not critical
     }
   }
 

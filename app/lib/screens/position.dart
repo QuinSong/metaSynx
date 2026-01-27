@@ -425,39 +425,57 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
 
     final slText = _slController.text.trim();
     final tpText = _tpController.text.trim();
+    
+    // Debug: print exactly what was entered
+    debugPrint('SL text entered: "$slText"');
+    debugPrint('TP text entered: "$tpText"');
+    
     final sl = slText.isNotEmpty ? double.tryParse(slText) : null;
     final tp = tpText.isNotEmpty ? double.tryParse(tpText) : null;
+    
+    // Debug: print parsed values
+    debugPrint('SL parsed: $sl');
+    debugPrint('TP parsed: $tp');
 
     if (sl == null && tp == null) {
       _showError('Please enter SL or TP value');
       return;
     }
 
-    // Get current price and position type for validation
-    final currentPrice = (widget.position['currentPrice'] as num?)?.toDouble() ?? 0;
-    final type = (widget.position['type'] as String? ?? '').toLowerCase();
+    // Get current price from live position data (not the static widget.position)
+    final ticket = widget.position['ticket'] as int?;
+    final terminalIndex = widget.position['terminalIndex'] as int?;
+    final livePosition = widget.positionsNotifier.value.firstWhere(
+      (p) => p['ticket'] == ticket && p['terminalIndex'] == terminalIndex,
+      orElse: () => widget.position,
+    );
+    
+    final currentPrice = (livePosition['currentPrice'] as num?)?.toDouble() ?? 0;
+    final type = (livePosition['type'] as String? ?? '').toLowerCase();
     final isBuy = type == 'buy';
 
     // Validate SL/TP based on position type and current price
-    if (isBuy) {
-      // BUY: SL must be below current price, TP must be above current price
-      if (sl != null && sl > 0 && sl >= currentPrice) {
-        _showError('Stop Loss must be below current price for BUY positions');
-        return;
-      }
-      if (tp != null && tp > 0 && tp <= currentPrice) {
-        _showError('Take Profit must be above current price for BUY positions');
-        return;
-      }
-    } else {
-      // SELL: SL must be above current price, TP must be below current price
-      if (sl != null && sl > 0 && sl <= currentPrice) {
-        _showError('Stop Loss must be above current price for SELL positions');
-        return;
-      }
-      if (tp != null && tp > 0 && tp >= currentPrice) {
-        _showError('Take Profit must be below current price for SELL positions');
-        return;
+    if (currentPrice > 0) {
+      if (isBuy) {
+        // BUY: SL must be below current price, TP must be above current price
+        if (sl != null && sl > 0 && sl >= currentPrice) {
+          _showError('Stop Loss must be below current price for BUY positions');
+          return;
+        }
+        if (tp != null && tp > 0 && tp <= currentPrice) {
+          _showError('Take Profit must be above current price for BUY positions');
+          return;
+        }
+      } else {
+        // SELL: SL must be above current price, TP must be below current price
+        if (sl != null && sl > 0 && sl <= currentPrice) {
+          _showError('Stop Loss must be above current price for SELL positions');
+          return;
+        }
+        if (tp != null && tp > 0 && tp >= currentPrice) {
+          _showError('Take Profit must be below current price for SELL positions');
+          return;
+        }
       }
     }
 
@@ -643,6 +661,9 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
 
           // Calculate total P/L across all matching positions
           double totalProfit = 0;
+          double totalBalance = 0;
+          final seenTerminals = <int>{};
+          
           for (final pos in matchingPositions) {
             final posRawProfit = (pos['profit'] as num?)?.toDouble() ?? 0;
             final posSwap = (pos['swap'] as num?)?.toDouble() ?? 0;
@@ -652,7 +673,20 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
             } else {
               totalProfit += posRawProfit;
             }
+            
+            // Sum up balances (only once per terminal)
+            final posTerminal = pos['terminalIndex'] as int? ?? -1;
+            if (!seenTerminals.contains(posTerminal)) {
+              seenTerminals.add(posTerminal);
+              final posAccount = widget.accounts.firstWhere(
+                (a) => a['index'] == posTerminal,
+                orElse: () => <String, dynamic>{},
+              );
+              totalBalance += (posAccount['balance'] as num?)?.toDouble() ?? 0;
+            }
           }
+          
+          final totalPlPercent = totalBalance > 0 ? (totalProfit / totalBalance) * 100 : 0.0;
 
           // Use known terminals for display to avoid flickering, sorted with main account first
           final displayTerminalsSet = _knownTerminalIndices.isNotEmpty 
@@ -872,13 +906,29 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
                                     : 'Total P/L (${displayTerminals.length} positions)',
                                 style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
                               ),
-                              Text(
-                                Formatters.formatCurrencyWithSign(totalProfit),
-                                style: TextStyle(
-                                  color: totalProfit >= 0 ? AppColors.primary : AppColors.error,
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                ),
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.end,
+                                children: [
+                                  Text(
+                                    Formatters.formatCurrencyWithSign(totalProfit),
+                                    style: TextStyle(
+                                      color: totalProfit >= 0 ? AppColors.primary : AppColors.error,
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  if (widget.showPLPercent) ...[
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      '${totalPlPercent >= 0 ? '+' : ''}${totalPlPercent.toStringAsFixed(2)}%',
+                                      style: TextStyle(
+                                        color: totalProfit >= 0 ? AppColors.primary : AppColors.error,
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ],
+                                ],
                               ),
                             ],
                           ),
