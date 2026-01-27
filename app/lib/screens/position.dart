@@ -7,10 +7,13 @@ class PositionDetailScreen extends StatefulWidget {
   final Map<String, dynamic> position;
   final ValueNotifier<List<Map<String, dynamic>>> positionsNotifier;
   final List<Map<String, dynamic>> accounts;
-  final void Function(int ticket, int terminalIndex, [double? lots]) onClosePosition;
-  final void Function(int ticket, int terminalIndex, double? sl, double? tp) onModifyPosition;
+  final void Function(int ticket, int terminalIndex, [double? lots])
+  onClosePosition;
+  final void Function(int ticket, int terminalIndex, double? sl, double? tp)
+  onModifyPosition;
   final void Function(int ticket, int terminalIndex) onCancelOrder;
-  final void Function(int ticket, int terminalIndex, double price) onModifyPendingOrder;
+  final void Function(int ticket, int terminalIndex, double price)
+  onModifyPendingOrder;
   final Map<String, String> accountNames;
   final String? mainAccountNum;
   final bool includeCommissionSwap;
@@ -31,10 +34,12 @@ class PositionDetailScreen extends StatefulWidget {
     required List<int> accountIndices,
     required bool useRatios,
     required bool applySuffix,
-  }) onPlaceOrder;
+  })
+  onPlaceOrder;
   // Chart data (optional - may not be available from position screen)
   final Stream<Map<String, dynamic>>? chartDataStream;
-  final void Function(String symbol, String timeframe, int terminalIndex)? onRequestChartData;
+  final void Function(String symbol, String timeframe, int terminalIndex)?
+  onRequestChartData;
   // Bottom nav bar for chart screen
   final Widget? bottomNavBar;
 
@@ -70,28 +75,28 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
   Set<int> _selectedTerminalIndices = {};
   Set<int> _knownTerminalIndices = {};
   bool _initialized = false;
-  
+
   final _slController = TextEditingController();
   final _tpController = TextEditingController();
   final _lotsController = TextEditingController();
   bool _isProcessing = false;
   int _digits = 5; // Default to 5 decimal places
-  
+
   // Track original SL/TP to detect modifications
   String _originalSL = '';
   String _originalTP = '';
   bool _hasModifications = false;
-  
+
   // Partial close
   bool _partialClose = false;
 
   @override
   void initState() {
     super.initState();
-    
+
     // Detect digits from open price
     _digits = _detectDigits(widget.position['openPrice']);
-    
+
     // Pre-fill SL/TP from current position using detected digits
     final sl = (widget.position['sl'] as num?)?.toDouble() ?? 0;
     final tp = (widget.position['tp'] as num?)?.toDouble() ?? 0;
@@ -103,28 +108,28 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
       _tpController.text = tp.toStringAsFixed(_digits);
       _originalTP = _tpController.text;
     }
-    
+
     // Listen to SL/TP changes to detect modifications
     _slController.addListener(_checkForModifications);
     _tpController.addListener(_checkForModifications);
-    
+
     // Initialize with the original position's terminal
     final originalTerminal = widget.position['terminalIndex'] as int;
     _selectedTerminalIndices.add(originalTerminal);
     _knownTerminalIndices.add(originalTerminal);
-    
+
     // Listen to position updates (data comes from home screen)
     widget.positionsNotifier.addListener(_onPositionsUpdated);
-    
+
     // Initialize with current data
     _onPositionsUpdated();
   }
-  
+
   void _checkForModifications() {
     final slChanged = _slController.text != _originalSL;
     final tpChanged = _tpController.text != _originalTP;
     final hasModifications = slChanged || tpChanged;
-    
+
     if (hasModifications != _hasModifications) {
       setState(() {
         _hasModifications = hasModifications;
@@ -135,27 +140,27 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
   /// Detect number of decimal places from a price value
   int _detectDigits(dynamic price) {
     if (price == null) return 5;
-    
+
     final priceStr = price.toString();
     final dotIndex = priceStr.indexOf('.');
     if (dotIndex < 0) return 0;
-    
+
     // Count digits after decimal, ignoring trailing zeros
     final decimals = priceStr.substring(dotIndex + 1);
-    
+
     // For forex pairs, typically 5 or 3 digits
     // For metals/indices, typically 2-3 digits
     // For crypto, can vary widely
-    
+
     // Use the actual decimal places from the price
     int digits = decimals.length;
-    
+
     // Common patterns:
     // EURUSD: 1.12345 = 5 digits
-    // USDJPY: 150.123 = 3 digits  
+    // USDJPY: 150.123 = 3 digits
     // XAUUSD: 2650.12 = 2 digits
     // BTCUSD: 45000.00 = 2 digits
-    
+
     // Cap at reasonable max
     return digits.clamp(0, 8);
   }
@@ -167,8 +172,10 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
 
   void _onPositionsUpdated() {
     final matching = _findMatchingPositions();
-    final currentTerminals = matching.map((p) => p['terminalIndex'] as int).toSet();
-    
+    final currentTerminals = matching
+        .map((p) => p['terminalIndex'] as int)
+        .toSet();
+
     if (!_initialized && matching.isNotEmpty) {
       // First time we get matching positions - select all
       setState(() {
@@ -210,7 +217,7 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
       // No magic number - this position stands alone
       return widget.positionsNotifier.value.where((p) {
         return p['terminalIndex'] == widget.position['terminalIndex'] &&
-               p['ticket'] == widget.position['ticket'];
+            p['ticket'] == widget.position['ticket'];
       }).toList();
     }
 
@@ -218,7 +225,7 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
     return widget.positionsNotifier.value.where((p) {
       if (p['symbol'] != symbol) return false;
       if (p['type'] != type) return false;
-      
+
       final posMagic = p['magic'] as int?;
       return posMagic == magic;
     }).toList();
@@ -228,7 +235,7 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
     // Get updated position data for the original position
     final terminalIndex = widget.position['terminalIndex'] as int;
     final ticket = widget.position['ticket'] as int;
-    
+
     try {
       return widget.positionsNotifier.value.firstWhere(
         (p) => p['terminalIndex'] == terminalIndex && p['ticket'] == ticket,
@@ -280,14 +287,14 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
 
     // Get all positions to close with their lots
     final positionsToClose = <Map<String, dynamic>>[];
-    
+
     // First, try to find matching positions
     final matching = _findMatchingPositions();
-    
+
     // Get main account for ratio calculations
     String? mainAccountNum = widget.mainAccountNum;
     double mainLots = closeLots ?? 0;
-    
+
     // If partial close with ratios, find the main account's position lots
     if (_partialClose && closeLots != null && mainAccountNum != null) {
       final mainAccount = widget.accounts.firstWhere(
@@ -295,14 +302,18 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
         orElse: () => <String, dynamic>{},
       );
       final mainTerminalIndex = mainAccount['index'] as int?;
-      
+
       if (mainTerminalIndex != null) {
-        final mainPos = matching.where((p) => p['terminalIndex'] == mainTerminalIndex).firstOrNull;
+        final mainPos = matching
+            .where((p) => p['terminalIndex'] == mainTerminalIndex)
+            .firstOrNull;
         if (mainPos != null) {
           final mainPosLots = (mainPos['lots'] as num?)?.toDouble() ?? 0;
           // Validate that close lots doesn't exceed position lots
           if (closeLots > mainPosLots) {
-            _showError('Lot size exceeds position size (${mainPosLots.toStringAsFixed(2)})');
+            _showError(
+              'Lot size exceeds position size (${mainPosLots.toStringAsFixed(2)})',
+            );
             setState(() => _isProcessing = false);
             return;
           }
@@ -310,13 +321,15 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
         }
       }
     }
-    
+
     for (final terminalIndex in _selectedTerminalIndices) {
-      final pos = matching.where((p) => p['terminalIndex'] == terminalIndex).firstOrNull;
+      final pos = matching
+          .where((p) => p['terminalIndex'] == terminalIndex)
+          .firstOrNull;
       if (pos != null) {
         final posLots = (pos['lots'] as num?)?.toDouble() ?? 0;
         double? lotsToClose;
-        
+
         if (_partialClose && closeLots != null) {
           // Calculate lots based on ratio
           final account = widget.accounts.firstWhere(
@@ -325,7 +338,7 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
           );
           final accountNum = account['account']?.toString() ?? '';
           final ratio = widget.lotRatios[accountNum] ?? 1.0;
-          
+
           if (mainAccountNum != null && accountNum == mainAccountNum) {
             // Main account uses the entered lots directly
             lotsToClose = closeLots;
@@ -338,13 +351,13 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
             // No ratios configured, use entered lots
             lotsToClose = closeLots;
           }
-          
+
           // Ensure we don't exceed position lots
           if (lotsToClose > posLots) {
             lotsToClose = posLots;
           }
         }
-        
+
         positionsToClose.add({
           'ticket': pos['ticket'] as int,
           'terminalIndex': terminalIndex,
@@ -352,23 +365,25 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
         });
       }
     }
-    
+
     // If no matches found, use the original position
     if (positionsToClose.isEmpty) {
       final origTerminal = widget.position['terminalIndex'] as int;
       if (_selectedTerminalIndices.contains(origTerminal)) {
         final origLots = (widget.position['lots'] as num?)?.toDouble() ?? 0;
         double? lotsToClose;
-        
+
         if (_partialClose && closeLots != null) {
           if (closeLots > origLots) {
-            _showError('Lot size exceeds position size (${origLots.toStringAsFixed(2)})');
+            _showError(
+              'Lot size exceeds position size (${origLots.toStringAsFixed(2)})',
+            );
             setState(() => _isProcessing = false);
             return;
           }
           lotsToClose = closeLots;
         }
-        
+
         positionsToClose.add({
           'ticket': widget.position['ticket'] as int,
           'terminalIndex': origTerminal,
@@ -386,7 +401,7 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
     // Send all close commands
     for (final item in positionsToClose) {
       widget.onClosePosition(
-        item['ticket'] as int, 
+        item['ticket'] as int,
         item['terminalIndex'] as int,
         item['lots'] as double?,
       );
@@ -397,21 +412,9 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
           ? 'Partially closing ${positionsToClose.length} position(s)'
           : 'Closing ${positionsToClose.length} position(s)';
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(message),
-          backgroundColor: AppColors.primary,
-        ),
+        SnackBar(content: Text(message), backgroundColor: AppColors.primary),
       );
-      if (!_partialClose || closeLots == null) {
-        Navigator.pop(context);
-      } else {
-        // For partial close, stay on screen and reset
-        setState(() {
-          _isProcessing = false;
-          _partialClose = false;
-          _lotsController.clear();
-        });
-      }
+      Navigator.pop(context);
     }
   }
 
@@ -421,7 +424,7 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
     final symbol = widget.position['symbol'] as String? ?? '';
     final count = _selectedTerminalIndices.length;
     final positionLabel = count == 1 ? 'position' : 'positions';
-    
+
     final result = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
@@ -524,7 +527,7 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
         ),
       ),
     );
-    
+
     return result ?? false;
   }
 
@@ -536,14 +539,14 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
 
     final slText = _slController.text.trim();
     final tpText = _tpController.text.trim();
-    
+
     // Debug: print exactly what was entered
     debugPrint('SL text entered: "$slText"');
     debugPrint('TP text entered: "$tpText"');
-    
+
     final sl = slText.isNotEmpty ? double.tryParse(slText) : null;
     final tp = tpText.isNotEmpty ? double.tryParse(tpText) : null;
-    
+
     // Debug: print parsed values
     debugPrint('SL parsed: $sl');
     debugPrint('TP parsed: $tp');
@@ -560,8 +563,9 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
       (p) => p['ticket'] == ticket && p['terminalIndex'] == terminalIndex,
       orElse: () => widget.position,
     );
-    
-    final currentPrice = (livePosition['currentPrice'] as num?)?.toDouble() ?? 0;
+
+    final currentPrice =
+        (livePosition['currentPrice'] as num?)?.toDouble() ?? 0;
     final type = (livePosition['type'] as String? ?? '').toLowerCase();
     final isBuy = type == 'buy';
 
@@ -574,17 +578,23 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
           return;
         }
         if (tp != null && tp > 0 && tp <= currentPrice) {
-          _showError('Take Profit must be above current price for BUY positions');
+          _showError(
+            'Take Profit must be above current price for BUY positions',
+          );
           return;
         }
       } else {
         // SELL: SL must be above current price, TP must be below current price
         if (sl != null && sl > 0 && sl <= currentPrice) {
-          _showError('Stop Loss must be above current price for SELL positions');
+          _showError(
+            'Stop Loss must be above current price for SELL positions',
+          );
           return;
         }
         if (tp != null && tp > 0 && tp >= currentPrice) {
-          _showError('Take Profit must be below current price for SELL positions');
+          _showError(
+            'Take Profit must be below current price for SELL positions',
+          );
           return;
         }
       }
@@ -594,11 +604,13 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
 
     // Get all positions to modify
     final positionsToModify = <Map<String, int>>[];
-    
+
     // First, try to find matching positions
     final matching = _findMatchingPositions();
     for (final terminalIndex in _selectedTerminalIndices) {
-      final pos = matching.where((p) => p['terminalIndex'] == terminalIndex).firstOrNull;
+      final pos = matching
+          .where((p) => p['terminalIndex'] == terminalIndex)
+          .firstOrNull;
       if (pos != null) {
         positionsToModify.add({
           'ticket': pos['ticket'] as int,
@@ -606,7 +618,7 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
         });
       }
     }
-    
+
     // If no matches found, use the original position
     if (positionsToModify.isEmpty) {
       final origTerminal = widget.position['terminalIndex'] as int;
@@ -642,17 +654,14 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
 
   void _showError(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.red.shade700,
-      ),
+      SnackBar(content: Text(message), backgroundColor: Colors.red.shade700),
     );
   }
 
   void _openChart() {
     final symbol = widget.position['symbol'] as String? ?? '';
     final terminalIndex = widget.position['terminalIndex'] as int?;
-    
+
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -689,7 +698,7 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
     // Get account display name for appbar
     final terminalIndex = widget.position['terminalIndex'] as int? ?? -1;
     final accountDisplayName = _getAccountDisplay(terminalIndex);
-    
+
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
@@ -706,7 +715,10 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
           Padding(
             padding: const EdgeInsets.only(right: 8),
             child: IconButton(
-              icon: const Icon(Icons.candlestick_chart, color: AppColors.primary),
+              icon: const Icon(
+                Icons.candlestick_chart,
+                color: AppColors.primary,
+              ),
               onPressed: () => _openChart(),
             ),
           ),
@@ -719,7 +731,7 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
           builder: (context, allPositions, _) {
             final currentPos = _getCurrentPosition();
             final matchingPositions = _findMatchingPositions();
-            
+
             if (currentPos == null) {
               return const Center(
                 child: Text('Position closed', style: AppTextStyles.body),
@@ -729,16 +741,19 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
             final symbol = currentPos['symbol'] as String? ?? '';
             final type = currentPos['type'] as String? ?? '';
             final lots = (currentPos['lots'] as num?)?.toDouble() ?? 0;
-            final openPrice = (currentPos['openPrice'] as num?)?.toDouble() ?? 0;
-            final currentPrice = (currentPos['currentPrice'] as num?)?.toDouble() ?? 0;
+            final openPrice =
+                (currentPos['openPrice'] as num?)?.toDouble() ?? 0;
+            final currentPrice =
+                (currentPos['currentPrice'] as num?)?.toDouble() ?? 0;
             final rawProfit = (currentPos['profit'] as num?)?.toDouble() ?? 0;
             final swap = (currentPos['swap'] as num?)?.toDouble() ?? 0;
-            final commission = (currentPos['commission'] as num?)?.toDouble() ?? 0;
-            final profit = widget.includeCommissionSwap 
-                ? rawProfit + swap + commission 
+            final commission =
+                (currentPos['commission'] as num?)?.toDouble() ?? 0;
+            final profit = widget.includeCommissionSwap
+                ? rawProfit + swap + commission
                 : rawProfit;
             final isBuy = type.toLowerCase() == 'buy';
-            
+
             // Get account balance for P/L %
             final posTerminalIndex = currentPos['terminalIndex'] as int? ?? -1;
             final account = widget.accounts.firstWhere(
@@ -746,605 +761,776 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
               orElse: () => <String, dynamic>{},
             );
             final balance = (account['balance'] as num?)?.toDouble() ?? 0;
-          final plPercent = balance > 0 ? (profit / balance) * 100 : 0.0;
+            final plPercent = balance > 0 ? (profit / balance) * 100 : 0.0;
 
-          // Calculate total P/L across all matching positions
-          double totalProfit = 0;
-          double totalBalance = 0;
-          final seenTerminals = <int>{};
-          
-          for (final pos in matchingPositions) {
-            final posRawProfit = (pos['profit'] as num?)?.toDouble() ?? 0;
-            final posSwap = (pos['swap'] as num?)?.toDouble() ?? 0;
-            final posCommission = (pos['commission'] as num?)?.toDouble() ?? 0;
-            if (widget.includeCommissionSwap) {
-              totalProfit += posRawProfit + posSwap + posCommission;
-            } else {
-              totalProfit += posRawProfit;
+            // Calculate total P/L across all matching positions
+            double totalProfit = 0;
+            double totalBalance = 0;
+            final seenTerminals = <int>{};
+
+            for (final pos in matchingPositions) {
+              final posRawProfit = (pos['profit'] as num?)?.toDouble() ?? 0;
+              final posSwap = (pos['swap'] as num?)?.toDouble() ?? 0;
+              final posCommission =
+                  (pos['commission'] as num?)?.toDouble() ?? 0;
+              if (widget.includeCommissionSwap) {
+                totalProfit += posRawProfit + posSwap + posCommission;
+              } else {
+                totalProfit += posRawProfit;
+              }
+
+              // Sum up balances (only once per terminal)
+              final posTerminal = pos['terminalIndex'] as int? ?? -1;
+              if (!seenTerminals.contains(posTerminal)) {
+                seenTerminals.add(posTerminal);
+                final posAccount = widget.accounts.firstWhere(
+                  (a) => a['index'] == posTerminal,
+                  orElse: () => <String, dynamic>{},
+                );
+                totalBalance +=
+                    (posAccount['balance'] as num?)?.toDouble() ?? 0;
+              }
             }
-            
-            // Sum up balances (only once per terminal)
-            final posTerminal = pos['terminalIndex'] as int? ?? -1;
-            if (!seenTerminals.contains(posTerminal)) {
-              seenTerminals.add(posTerminal);
-              final posAccount = widget.accounts.firstWhere(
-                (a) => a['index'] == posTerminal,
+
+            final totalPlPercent = totalBalance > 0
+                ? (totalProfit / totalBalance) * 100
+                : 0.0;
+
+            // Use known terminals for display to avoid flickering, sorted with main account first
+            final displayTerminalsSet = _knownTerminalIndices.isNotEmpty
+                ? _knownTerminalIndices
+                : matchingPositions
+                      .map((p) => p['terminalIndex'] as int)
+                      .toSet();
+            final displayTerminals = displayTerminalsSet.toList();
+            // Sort with main account first
+            displayTerminals.sort((a, b) {
+              final aAccount = widget.accounts.firstWhere(
+                (acc) => acc['index'] == a,
                 orElse: () => <String, dynamic>{},
               );
-              totalBalance += (posAccount['balance'] as num?)?.toDouble() ?? 0;
-            }
-          }
-          
-          final totalPlPercent = totalBalance > 0 ? (totalProfit / totalBalance) * 100 : 0.0;
+              final bAccount = widget.accounts.firstWhere(
+                (acc) => acc['index'] == b,
+                orElse: () => <String, dynamic>{},
+              );
+              final aIsMain = aAccount['account'] == widget.mainAccountNum;
+              final bIsMain = bAccount['account'] == widget.mainAccountNum;
+              if (aIsMain && !bIsMain) return -1;
+              if (!aIsMain && bIsMain) return 1;
+              return a.compareTo(b);
+            });
 
-          // Use known terminals for display to avoid flickering, sorted with main account first
-          final displayTerminalsSet = _knownTerminalIndices.isNotEmpty 
-              ? _knownTerminalIndices 
-              : matchingPositions.map((p) => p['terminalIndex'] as int).toSet();
-          final displayTerminals = displayTerminalsSet.toList();
-          // Sort with main account first
-          displayTerminals.sort((a, b) {
-            final aAccount = widget.accounts.firstWhere(
-              (acc) => acc['index'] == a,
-              orElse: () => <String, dynamic>{},
-            );
-            final bAccount = widget.accounts.firstWhere(
-              (acc) => acc['index'] == b,
-              orElse: () => <String, dynamic>{},
-            );
-            final aIsMain = aAccount['account'] == widget.mainAccountNum;
-            final bIsMain = bAccount['account'] == widget.mainAccountNum;
-            if (aIsMain && !bIsMain) return -1;
-            if (!aIsMain && bIsMain) return 1;
-            return a.compareTo(b);
-          });
-
-          return SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Position summary card
-                Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [
-                        AppColors.primaryWithOpacity(0.15),
-                        AppColors.primaryWithOpacity(0.05),
-                      ],
+            return SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Position summary card
+                  Container(
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [
+                          AppColors.primaryWithOpacity(0.15),
+                          AppColors.primaryWithOpacity(0.05),
+                        ],
+                      ),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: isBuy
+                            ? AppColors.primary.withOpacity(0.3)
+                            : AppColors.error.withOpacity(0.3),
+                      ),
                     ),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                      color: isBuy 
-                          ? AppColors.primary.withOpacity(0.3) 
-                          : AppColors.error.withOpacity(0.3),
-                    ),
-                  ),
-                  child: Column(
-                    children: [
-                      Row(
-                        children: [
-                          Text(
-                            symbol,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 24,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: isBuy ? AppColors.primary : AppColors.error,
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Text(
-                              type.toUpperCase(),
+                    child: Column(
+                      children: [
+                        Row(
+                          children: [
+                            Text(
+                              symbol,
                               style: const TextStyle(
                                 color: Colors.white,
-                                fontSize: 12,
+                                fontSize: 24,
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
-                          ),
-                          const Spacer(),
-                          Text(
-                            '${lots.toStringAsFixed(2)} lots',
-                            style: AppTextStyles.body,
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 20),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text('Open Price', style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
-                                Text(
-                                  _formatPrice(openPrice),
-                                  style: const TextStyle(color: Colors.white, fontSize: 16),
+                            const SizedBox(width: 12),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 6,
+                              ),
+                              decoration: BoxDecoration(
+                                color: isBuy
+                                    ? AppColors.primary
+                                    : AppColors.error,
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                type.toUpperCase(),
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
                                 ),
-                              ],
+                              ),
                             ),
-                          ),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.center,
-                              children: [
-                                const Text('Current Price', style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
-                                Text(
-                                  _formatPrice(currentPrice),
-                                  style: TextStyle(
-                                    color: isBuy 
-                                        ? (currentPrice >= openPrice ? AppColors.primary : AppColors.error)
-                                        : (currentPrice <= openPrice ? AppColors.primary : AppColors.error),
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                              ],
+                            const Spacer(),
+                            Text(
+                              '${lots.toStringAsFixed(2)} lots',
+                              style: AppTextStyles.body,
                             ),
-                          ),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.end,
-                              children: [
-                                Row(
-                                  mainAxisAlignment: MainAxisAlignment.end,
-                                  children: [
-                                    Text(
-                                      widget.includeCommissionSwap ? 'Net P/L' : 'P/L',
-                                      style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
+                          ],
+                        ),
+                        const SizedBox(height: 20),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    'Open Price',
+                                    style: TextStyle(
+                                      color: AppColors.textSecondary,
+                                      fontSize: 12,
                                     ),
-                                    if (widget.showPLPercent && balance > 0) ...[
-                                      const SizedBox(width: 8),
+                                  ),
+                                  Text(
+                                    _formatPrice(openPrice),
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 16,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.center,
+                                children: [
+                                  const Text(
+                                    'Current Price',
+                                    style: TextStyle(
+                                      color: AppColors.textSecondary,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                  Text(
+                                    _formatPrice(currentPrice),
+                                    style: TextStyle(
+                                      color: isBuy
+                                          ? (currentPrice >= openPrice
+                                                ? AppColors.primary
+                                                : AppColors.error)
+                                          : (currentPrice <= openPrice
+                                                ? AppColors.primary
+                                                : AppColors.error),
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.end,
+                                children: [
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.end,
+                                    children: [
                                       Text(
-                                        '${plPercent.toStringAsFixed(2)}%',
-                                        style: TextStyle(
-                                          color: profit == 0 
-                                              ? Colors.white 
-                                              : (profit > 0 ? AppColors.primary : AppColors.error),
+                                        widget.includeCommissionSwap
+                                            ? 'Net P/L'
+                                            : 'P/L',
+                                        style: const TextStyle(
+                                          color: AppColors.textSecondary,
                                           fontSize: 12,
                                         ),
                                       ),
+                                      if (widget.showPLPercent &&
+                                          balance > 0) ...[
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          '${plPercent.toStringAsFixed(2)}%',
+                                          style: TextStyle(
+                                            color: profit == 0
+                                                ? Colors.white
+                                                : (profit > 0
+                                                      ? AppColors.primary
+                                                      : AppColors.error),
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                      ],
                                     ],
-                                  ],
-                                ),
-                                Text(
-                                  Formatters.formatCurrencyWithSign(profit),
-                                  style: TextStyle(
-                                    color: profit >= 0 ? AppColors.primary : AppColors.error,
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.bold,
                                   ),
-                                ),
-                              ],
+                                  Text(
+                                    Formatters.formatCurrencyWithSign(profit),
+                                    style: TextStyle(
+                                      color: profit >= 0
+                                          ? AppColors.primary
+                                          : AppColors.error,
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
-                          ),
-                        ],
-                      ),
-                      
-                      // Always show commission/swap details
-                      const SizedBox(height: 12),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceAround,
-                        children: [
-                          if (widget.includeCommissionSwap)
+                          ],
+                        ),
+
+                        // Always show commission/swap details
+                        const SizedBox(height: 12),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceAround,
+                          children: [
+                            if (widget.includeCommissionSwap)
+                              Column(
+                                children: [
+                                  const Text(
+                                    'Raw P/L',
+                                    style: TextStyle(
+                                      color: AppColors.textSecondary,
+                                      fontSize: 11,
+                                    ),
+                                  ),
+                                  Text(
+                                    Formatters.formatCurrencyWithSign(
+                                      rawProfit,
+                                    ),
+                                    style: TextStyle(
+                                      color: rawProfit == 0
+                                          ? Colors.white
+                                          : (rawProfit > 0
+                                                ? AppColors.primary
+                                                : AppColors.error),
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                ],
+                              ),
                             Column(
                               children: [
-                                const Text('Raw P/L', style: TextStyle(color: AppColors.textSecondary, fontSize: 11)),
-                                Text(
-                                  Formatters.formatCurrencyWithSign(rawProfit),
+                                const Text(
+                                  'Swap',
                                   style: TextStyle(
-                                    color: rawProfit == 0 ? Colors.white : (rawProfit > 0 ? AppColors.primary : AppColors.error),
+                                    color: AppColors.textSecondary,
+                                    fontSize: 11,
+                                  ),
+                                ),
+                                Text(
+                                  Formatters.formatCurrency(swap),
+                                  style: TextStyle(
+                                    color: swap == 0
+                                        ? Colors.white
+                                        : (swap > 0
+                                              ? AppColors.primary
+                                              : AppColors.error),
                                     fontSize: 13,
                                   ),
                                 ),
                               ],
                             ),
-                          Column(
-                            children: [
-                              const Text('Swap', style: TextStyle(color: AppColors.textSecondary, fontSize: 11)),
-                              Text(
-                                Formatters.formatCurrency(swap),
-                                style: TextStyle(
-                                  color: swap == 0 ? Colors.white : (swap > 0 ? AppColors.primary : AppColors.error),
-                                  fontSize: 13,
-                                ),
-                              ),
-                            ],
-                          ),
-                          Column(
-                            children: [
-                              const Text('Commission', style: TextStyle(color: AppColors.textSecondary, fontSize: 11)),
-                              Text(
-                                Formatters.formatCurrency(commission),
-                                style: TextStyle(
-                                  color: commission == 0 ? Colors.white : (commission > 0 ? AppColors.primary : AppColors.error),
-                                  fontSize: 13,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                      
-                      // Total P/L if multiple positions
-                      if (displayTerminals.length > 1) ...[
-                        const SizedBox(height: 16),
-                        Container(
-                          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
-                          decoration: BoxDecoration(
-                            color: totalProfit >= 0
-                                ? AppColors.primary.withOpacity(0.1)
-                                : AppColors.error.withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text(
-                                widget.includeCommissionSwap 
-                                    ? 'Total Net P/L (${displayTerminals.length} positions)'
-                                    : 'Total P/L (${displayTerminals.length} positions)',
-                                style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
-                              ),
-                              Column(
-                                crossAxisAlignment: CrossAxisAlignment.end,
-                                children: [
-                                  Text(
-                                    Formatters.formatCurrencyWithSign(totalProfit),
-                                    style: TextStyle(
-                                      color: totalProfit >= 0 ? AppColors.primary : AppColors.error,
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                  if (widget.showPLPercent) ...[
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      '${totalPlPercent >= 0 ? '+' : ''}${totalPlPercent.toStringAsFixed(2)}%',
-                                      style: TextStyle(
-                                        color: totalProfit >= 0 ? AppColors.primary : AppColors.error,
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ],
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-
-                const SizedBox(height: 24),
-
-                // Accounts selection
-                Text(
-                  'ACCOUNTS (${_selectedTerminalIndices.length}/${displayTerminals.length})',
-                  style: AppTextStyles.label,
-                ),
-                const SizedBox(height: 12),
-                
-                if (displayTerminals.length <= 1)
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: AppColors.surface,
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.info_outline, color: AppColors.textSecondary, size: 18),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'Position only exists on ${_getAccountDisplay(widget.position['terminalIndex'] as int)}',
-                            style: const TextStyle(color: AppColors.textSecondary, fontSize: 13),
-                          ),
-                        ),
-                      ],
-                    ),
-                  )
-                else
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: displayTerminals.map((terminalIndex) {
-                      final accountNum = _getAccountDisplay(terminalIndex);
-                      final pos = matchingPositions.where((p) => p['terminalIndex'] == terminalIndex).firstOrNull;
-                      final posProfit = (pos?['profit'] as num?)?.toDouble() ?? 0;
-                      final isSelected = _selectedTerminalIndices.contains(terminalIndex);
-
-                      return GestureDetector(
-                        onTap: () {
-                          setState(() {
-                            if (isSelected) {
-                              _selectedTerminalIndices.remove(terminalIndex);
-                            } else {
-                              _selectedTerminalIndices.add(terminalIndex);
-                            }
-                          });
-                        },
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                          decoration: BoxDecoration(
-                            color: isSelected 
-                                ? AppColors.primaryWithOpacity(0.2) 
-                                : AppColors.surface,
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(
-                              color: isSelected ? AppColors.primary : AppColors.border,
-                              width: isSelected ? 2 : 1,
-                            ),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                isSelected ? Icons.check_circle : Icons.circle_outlined,
-                                color: isSelected ? AppColors.primary : AppColors.textSecondary,
-                                size: 18,
-                              ),
-                              const SizedBox(width: 8),
-                              Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    accountNum,
-                                    style: TextStyle(
-                                      color: isSelected ? Colors.white : AppColors.textSecondary,
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                  Text(
-                                    Formatters.formatCurrencyWithSign(posProfit),
-                                    style: TextStyle(
-                                      color: posProfit >= 0 ? AppColors.primary : AppColors.error,
-                                      fontSize: 11,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    }).toList(),
-                  ),
-
-                const SizedBox(height: 32),
-
-                // Modify section
-                const Text('MODIFY POSITION', style: AppTextStyles.label),
-                const SizedBox(height: 12),
-                
-                Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text('Stop Loss', style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
-                          const SizedBox(height: 6),
-                          TextField(
-                            controller: _slController,
-                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                            style: const TextStyle(color: Colors.white),
-                            decoration: InputDecoration(
-                              hintText: _formatPrice(0),
-                              hintStyle: TextStyle(color: AppColors.textSecondary.withOpacity(0.5)),
-                              filled: true,
-                              fillColor: AppColors.surface,
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(10),
-                                borderSide: BorderSide.none,
-                              ),
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text('Take Profit', style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
-                          const SizedBox(height: 6),
-                          TextField(
-                            controller: _tpController,
-                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                            style: const TextStyle(color: Colors.white),
-                            decoration: InputDecoration(
-                              hintText: _formatPrice(0),
-                              hintStyle: TextStyle(color: AppColors.textSecondary.withOpacity(0.5)),
-                              filled: true,
-                              fillColor: AppColors.surface,
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(10),
-                                borderSide: BorderSide.none,
-                              ),
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-
-                const SizedBox(height: 16),
-
-                SizedBox(
-                  width: double.infinity,
-                  height: 50,
-                  child: OutlinedButton(
-                    onPressed: _isProcessing ? null : _modifyPositions,
-                    style: OutlinedButton.styleFrom(
-                      side: const BorderSide(color: AppColors.primary),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                    ),
-                    child: Text(
-                      'MODIFY ${_selectedTerminalIndices.length} ${_getPositionTypeLabel()}',
-                      style: const TextStyle(
-                        color: AppColors.primary,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ),
-
-                const SizedBox(height: 16),
-
-                // Partial close section
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: AppColors.surface,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: _partialClose ? AppColors.error.withOpacity(0.5) : AppColors.border,
-                    ),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          GestureDetector(
-                            onTap: () {
-                              setState(() {
-                                _partialClose = !_partialClose;
-                                if (!_partialClose) {
-                                  _lotsController.clear();
-                                }
-                              });
-                            },
-                            child: Row(
+                            Column(
                               children: [
-                                Icon(
-                                  _partialClose ? Icons.check_box : Icons.check_box_outline_blank,
-                                  color: _partialClose ? AppColors.error : AppColors.textSecondary,
-                                  size: 22,
-                                ),
-                                const SizedBox(width: 8),
-                                Text(
-                                  'Partial Close',
+                                const Text(
+                                  'Commission',
                                   style: TextStyle(
-                                    color: _partialClose ? Colors.white : AppColors.textSecondary,
-                                    fontSize: 14,
-                                    fontWeight: _partialClose ? FontWeight.w600 : FontWeight.normal,
+                                    color: AppColors.textSecondary,
+                                    fontSize: 11,
+                                  ),
+                                ),
+                                Text(
+                                  Formatters.formatCurrency(commission),
+                                  style: TextStyle(
+                                    color: commission == 0
+                                        ? Colors.white
+                                        : (commission > 0
+                                              ? AppColors.primary
+                                              : AppColors.error),
+                                    fontSize: 13,
                                   ),
                                 ),
                               ],
                             ),
-                          ),
-                          const Spacer(),
-                          Text(
-                            'Max: ${lots.toStringAsFixed(2)}',
-                            style: const TextStyle(
-                              color: AppColors.textMuted,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
-                      ),
-                      if (_partialClose) ...[
-                        const SizedBox(height: 12),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: TextField(
-                                controller: _lotsController,
-                                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                                style: const TextStyle(color: Colors.white),
-                                decoration: InputDecoration(
-                                  hintText: 'Lots to close',
-                                  hintStyle: TextStyle(color: AppColors.textSecondary.withOpacity(0.5)),
-                                  filled: true,
-                                  fillColor: AppColors.background,
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(8),
-                                    borderSide: BorderSide.none,
-                                  ),
-                                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            // Quick buttons for common percentages
-                            _buildQuickLotButton('25%', lots * 0.25),
-                            const SizedBox(width: 4),
-                            _buildQuickLotButton('50%', lots * 0.50),
-                            const SizedBox(width: 4),
-                            _buildQuickLotButton('75%', lots * 0.75),
                           ],
                         ),
-                        if (widget.lotRatios.isNotEmpty && _selectedTerminalIndices.length > 1) ...[
-                          const SizedBox(height: 8),
-                          Text(
-                            'Lot ratios will be applied to other accounts',
-                            style: TextStyle(
-                              color: AppColors.textMuted,
-                              fontSize: 11,
-                              fontStyle: FontStyle.italic,
+
+                        // Total P/L if multiple positions
+                        if (displayTerminals.length > 1) ...[
+                          const SizedBox(height: 16),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              vertical: 10,
+                              horizontal: 14,
+                            ),
+                            decoration: BoxDecoration(
+                              color: totalProfit >= 0
+                                  ? AppColors.primary.withOpacity(0.1)
+                                  : AppColors.error.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  widget.includeCommissionSwap
+                                      ? 'Total Net P/L (${displayTerminals.length} positions)'
+                                      : 'Total P/L (${displayTerminals.length} positions)',
+                                  style: const TextStyle(
+                                    color: AppColors.textSecondary,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.end,
+                                  children: [
+                                    Text(
+                                      Formatters.formatCurrencyWithSign(
+                                        totalProfit,
+                                      ),
+                                      style: TextStyle(
+                                        color: totalProfit >= 0
+                                            ? AppColors.primary
+                                            : AppColors.error,
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    if (widget.showPLPercent) ...[
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        '${totalPlPercent >= 0 ? '+' : ''}${totalPlPercent.toStringAsFixed(2)}%',
+                                        style: TextStyle(
+                                          color: totalProfit >= 0
+                                              ? AppColors.primary
+                                              : AppColors.error,
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              ],
                             ),
                           ),
                         ],
                       ],
-                    ],
-                  ),
-                ),
-
-                const SizedBox(height: 16),
-
-                // Close button - disabled if SL/TP has been modified
-                SizedBox(
-                  width: double.infinity,
-                  height: 56,
-                  child: ElevatedButton(
-                    onPressed: (_isProcessing || _hasModifications) ? null : _closePositions,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: _hasModifications ? AppColors.error.withOpacity(0.3) : AppColors.error,
-                      disabledBackgroundColor: AppColors.error.withOpacity(0.3),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
                     ),
-                    child: _isProcessing
-                        ? const CircularProgressIndicator(color: Colors.white)
-                        : Text(
-                            _partialClose && _lotsController.text.isNotEmpty
-                                ? 'PARTIAL CLOSE ${_selectedTerminalIndices.length} ${_getPositionTypeLabel()}'
-                                : 'CLOSE ${_selectedTerminalIndices.length} ${_getPositionTypeLabel()}',
-                            style: TextStyle(
-                              color: _hasModifications ? Colors.white.withOpacity(0.5) : Colors.white,
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
+                  ),
+
+                  const SizedBox(height: 24),
+
+                  // Accounts selection
+                  Text(
+                    'ACCOUNTS (${_selectedTerminalIndices.length}/${displayTerminals.length})',
+                    style: AppTextStyles.label,
+                  ),
+                  const SizedBox(height: 12),
+
+                  if (displayTerminals.length <= 1)
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: AppColors.surface,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.info_outline,
+                            color: AppColors.textSecondary,
+                            size: 18,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Position only exists on ${_getAccountDisplay(widget.position['terminalIndex'] as int)}',
+                              style: const TextStyle(
+                                color: AppColors.textSecondary,
+                                fontSize: 13,
+                              ),
                             ),
                           ),
+                        ],
+                      ),
+                    )
+                  else
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: displayTerminals.map((terminalIndex) {
+                        final accountNum = _getAccountDisplay(terminalIndex);
+                        final pos = matchingPositions
+                            .where((p) => p['terminalIndex'] == terminalIndex)
+                            .firstOrNull;
+                        final posProfit =
+                            (pos?['profit'] as num?)?.toDouble() ?? 0;
+                        final isSelected = _selectedTerminalIndices.contains(
+                          terminalIndex,
+                        );
+
+                        return GestureDetector(
+                          onTap: () {
+                            setState(() {
+                              if (isSelected) {
+                                _selectedTerminalIndices.remove(terminalIndex);
+                              } else {
+                                _selectedTerminalIndices.add(terminalIndex);
+                              }
+                            });
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 10,
+                            ),
+                            decoration: BoxDecoration(
+                              color: isSelected
+                                  ? AppColors.primaryWithOpacity(0.2)
+                                  : AppColors.surface,
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                color: isSelected
+                                    ? AppColors.primary
+                                    : AppColors.border,
+                                width: isSelected ? 2 : 1,
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  isSelected
+                                      ? Icons.check_circle
+                                      : Icons.circle_outlined,
+                                  color: isSelected
+                                      ? AppColors.primary
+                                      : AppColors.textSecondary,
+                                  size: 18,
+                                ),
+                                const SizedBox(width: 8),
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      accountNum,
+                                      style: TextStyle(
+                                        color: isSelected
+                                            ? Colors.white
+                                            : AppColors.textSecondary,
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    Text(
+                                      Formatters.formatCurrencyWithSign(
+                                        posProfit,
+                                      ),
+                                      style: TextStyle(
+                                        color: posProfit >= 0
+                                            ? AppColors.primary
+                                            : AppColors.error,
+                                        fontSize: 11,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+
+                  const SizedBox(height: 32),
+
+                  // Modify section
+                  const Text('MODIFY POSITION', style: AppTextStyles.label),
+                  const SizedBox(height: 12),
+
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Stop Loss',
+                              style: TextStyle(
+                                color: AppColors.textSecondary,
+                                fontSize: 12,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            TextField(
+                              controller: _slController,
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                    decimal: true,
+                                  ),
+                              style: const TextStyle(color: Colors.white),
+                              decoration: InputDecoration(
+                                hintText: _formatPrice(0),
+                                hintStyle: TextStyle(
+                                  color: AppColors.textSecondary.withOpacity(
+                                    0.5,
+                                  ),
+                                ),
+                                filled: true,
+                                fillColor: AppColors.surface,
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                  borderSide: BorderSide.none,
+                                ),
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 14,
+                                  vertical: 14,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Take Profit',
+                              style: TextStyle(
+                                color: AppColors.textSecondary,
+                                fontSize: 12,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            TextField(
+                              controller: _tpController,
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                    decimal: true,
+                                  ),
+                              style: const TextStyle(color: Colors.white),
+                              decoration: InputDecoration(
+                                hintText: _formatPrice(0),
+                                hintStyle: TextStyle(
+                                  color: AppColors.textSecondary.withOpacity(
+                                    0.5,
+                                  ),
+                                ),
+                                filled: true,
+                                fillColor: AppColors.surface,
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                  borderSide: BorderSide.none,
+                                ),
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 14,
+                                  vertical: 14,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
-                ),
-              ],
-            ),
-          );
-        },
-      ),
+
+                  const SizedBox(height: 16),
+
+                  SizedBox(
+                    width: double.infinity,
+                    height: 50,
+                    child: OutlinedButton(
+                      onPressed: _isProcessing ? null : _modifyPositions,
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: AppColors.primary),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                      child: Text(
+                        'MODIFY ${_selectedTerminalIndices.length} ${_getPositionTypeLabel()}',
+                        style: const TextStyle(
+                          color: AppColors.primary,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // Partial close section
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: AppColors.surface,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: _partialClose
+                            ? AppColors.error.withOpacity(0.5)
+                            : AppColors.border,
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            GestureDetector(
+                              onTap: () {
+                                setState(() {
+                                  _partialClose = !_partialClose;
+                                  if (!_partialClose) {
+                                    _lotsController.clear();
+                                  }
+                                });
+                              },
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    _partialClose
+                                        ? Icons.check_box
+                                        : Icons.check_box_outline_blank,
+                                    color: _partialClose
+                                        ? AppColors.error
+                                        : AppColors.textSecondary,
+                                    size: 22,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    'Partial Close',
+                                    style: TextStyle(
+                                      color: _partialClose
+                                          ? Colors.white
+                                          : AppColors.textSecondary,
+                                      fontSize: 14,
+                                      fontWeight: _partialClose
+                                          ? FontWeight.w600
+                                          : FontWeight.normal,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const Spacer(),
+                            Text(
+                              'Max: ${lots.toStringAsFixed(2)}',
+                              style: const TextStyle(
+                                color: AppColors.textMuted,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                        if (_partialClose) ...[
+                          const SizedBox(height: 12),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: TextField(
+                                  controller: _lotsController,
+                                  keyboardType:
+                                      const TextInputType.numberWithOptions(
+                                        decimal: true,
+                                      ),
+                                  style: const TextStyle(color: Colors.white),
+                                  decoration: InputDecoration(
+                                    hintText: 'Lots to close',
+                                    hintStyle: TextStyle(
+                                      color: AppColors.textSecondary
+                                          .withOpacity(0.5),
+                                    ),
+                                    filled: true,
+                                    fillColor: AppColors.background,
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(8),
+                                      borderSide: BorderSide.none,
+                                    ),
+                                    contentPadding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 12,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              // Quick buttons for common percentages
+                              _buildQuickLotButton('25%', lots * 0.25),
+                              const SizedBox(width: 4),
+                              _buildQuickLotButton('50%', lots * 0.50),
+                              const SizedBox(width: 4),
+                              _buildQuickLotButton('75%', lots * 0.75),
+                            ],
+                          ),
+                          if (widget.lotRatios.isNotEmpty &&
+                              _selectedTerminalIndices.length > 1) ...[
+                            const SizedBox(height: 8),
+                            Text(
+                              'Lot ratios will be applied to other accounts',
+                              style: TextStyle(
+                                color: AppColors.textMuted,
+                                fontSize: 11,
+                                fontStyle: FontStyle.italic,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // Close button - disabled if SL/TP has been modified
+                  SizedBox(
+                    width: double.infinity,
+                    height: 56,
+                    child: ElevatedButton(
+                      onPressed: (_isProcessing || _hasModifications)
+                          ? null
+                          : _closePositions,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _hasModifications
+                            ? AppColors.error.withOpacity(0.3)
+                            : AppColors.error,
+                        disabledBackgroundColor: AppColors.error.withOpacity(
+                          0.3,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: _isProcessing
+                          ? const CircularProgressIndicator(color: Colors.white)
+                          : Text(
+                              _partialClose && _lotsController.text.isNotEmpty
+                                  ? 'PARTIAL CLOSE ${_selectedTerminalIndices.length} ${_getPositionTypeLabel()}'
+                                  : 'CLOSE ${_selectedTerminalIndices.length} ${_getPositionTypeLabel()}',
+                              style: TextStyle(
+                                color: _hasModifications
+                                    ? Colors.white.withOpacity(0.5)
+                                    : Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
       ),
     );
   }
@@ -1353,7 +1539,7 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
     // Round to 2 decimal places, minimum 0.01
     final roundedValue = (value * 100).round() / 100;
     final displayValue = roundedValue < 0.01 ? 0.01 : roundedValue;
-    
+
     return GestureDetector(
       onTap: () {
         _lotsController.text = displayValue.toStringAsFixed(2);

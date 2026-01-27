@@ -2,7 +2,7 @@ import os
 import time
 
 
-msg = 'starting with partial close 2'
+msg = 'added partial close'
 
 
 os.system('git add .')
