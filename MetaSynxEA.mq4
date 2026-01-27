@@ -449,6 +449,96 @@ void ProcessCommand(string jsonCommand)
       g_chartSymbol = "";
       Print("CHART UNSUBSCRIBE");
    }
+   else if(action == "get_history")
+   {
+      string period = ExtractJsonString(jsonCommand, "period"); // today, week, month
+      Print("HISTORY REQUEST: period=", period);
+      WriteHistory(period);
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Write closed positions history                                     |
+//+------------------------------------------------------------------+
+void WriteHistory(string period)
+{
+   datetime startTime;
+   datetime now = TimeCurrent();
+   
+   // Calculate start time based on period
+   if(period == "today")
+   {
+      // Start of today (midnight)
+      startTime = now - (now % 86400);
+   }
+   else if(period == "week")
+   {
+      // 7 days ago
+      startTime = now - (7 * 86400);
+   }
+   else if(period == "month")
+   {
+      // 30 days ago
+      startTime = now - (30 * 86400);
+   }
+   else
+   {
+      // Default to today
+      startTime = now - (now % 86400);
+   }
+   
+   string json = "{\"index\":" + IntegerToString(g_terminalIndex) + ",";
+   json += "\"account\":\"" + IntegerToString(AccountNumber()) + "\",";
+   json += "\"period\":\"" + period + "\",";
+   json += "\"history\":[";
+   
+   int count = 0;
+   int total = OrdersHistoryTotal();
+   
+   for(int i = total - 1; i >= 0; i--)
+   {
+      if(!OrderSelect(i, SELECT_BY_POS, MODE_HISTORY)) continue;
+      
+      // Only include orders closed after start time
+      if(OrderCloseTime() < startTime) continue;
+      
+      // Only include actual trades (buy/sell), not pending orders
+      if(OrderType() > OP_SELL) continue;
+      
+      if(count > 0) json += ",";
+      
+      json += "{";
+      json += "\"ticket\":" + IntegerToString(OrderTicket()) + ",";
+      json += "\"symbol\":\"" + OrderSymbol() + "\",";
+      json += "\"type\":\"" + GetOrderTypeString(OrderType()) + "\",";
+      json += "\"lots\":" + DoubleToString(OrderLots(), 2) + ",";
+      json += "\"openPrice\":" + DoubleToString(OrderOpenPrice(), (int)MarketInfo(OrderSymbol(), MODE_DIGITS)) + ",";
+      json += "\"closePrice\":" + DoubleToString(OrderClosePrice(), (int)MarketInfo(OrderSymbol(), MODE_DIGITS)) + ",";
+      json += "\"openTime\":" + IntegerToString((int)OrderOpenTime()) + ",";
+      json += "\"closeTime\":" + IntegerToString((int)OrderCloseTime()) + ",";
+      json += "\"profit\":" + DoubleToString(OrderProfit(), 2) + ",";
+      json += "\"swap\":" + DoubleToString(OrderSwap(), 2) + ",";
+      json += "\"commission\":" + DoubleToString(OrderCommission(), 2) + ",";
+      json += "\"magic\":" + IntegerToString(OrderMagicNumber());
+      json += "}";
+      
+      count++;
+      
+      // Limit to 500 trades to avoid huge files
+      if(count >= 500) break;
+   }
+   
+   json += "]}";
+   
+   // Write to history file
+   string filename = g_bridgeFolder + "\\history_" + IntegerToString(g_terminalIndex) + ".json";
+   int handle = FileOpen(filename, FILE_WRITE|FILE_TXT|FILE_COMMON);
+   if(handle != INVALID_HANDLE)
+   {
+      FileWriteString(handle, json);
+      FileClose(handle);
+      Print("History written: ", count, " trades for period ", period);
+   }
 }
 
 //+------------------------------------------------------------------+

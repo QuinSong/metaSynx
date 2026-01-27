@@ -128,6 +128,10 @@ class _HomeScreenState extends State<HomeScreen> {
         _handleGetChartData(message);
         break;
 
+      case 'get_history':
+        _handleGetHistory(message);
+        break;
+
       default:
         _addLog('Unknown action: $action');
     }
@@ -230,6 +234,51 @@ class _HomeScreenState extends State<HomeScreen> {
         ...data,
       });
     }
+  }
+
+  void _handleGetHistory(Map<String, dynamic> message) {
+    final period = message['period'] as String? ?? 'today';
+    final terminalIndex = message['terminalIndex'] as int?;
+    
+    _addLog('Getting history: period=$period, terminal=$terminalIndex');
+    
+    // Fire and forget
+    _fetchAndSendHistory(period, terminalIndex);
+  }
+  
+  Future<void> _fetchAndSendHistory(String period, int? terminalIndex) async {
+    final allHistory = <Map<String, dynamic>>[];
+    
+    if (terminalIndex != null) {
+      // Get history for specific terminal
+      final history = await _eaService.getHistory(period, terminalIndex);
+      allHistory.addAll(history);
+    } else {
+      // Get history for all terminals - get indices from accounts
+      final accounts = await _eaService.getAccounts();
+      for (final account in accounts) {
+        final idx = account['index'] as int?;
+        if (idx != null) {
+          final history = await _eaService.getHistory(period, idx);
+          allHistory.addAll(history);
+        }
+      }
+    }
+    
+    // Sort by close time descending
+    allHistory.sort((a, b) {
+      final aTime = a['closeTime'] as int? ?? 0;
+      final bTime = b['closeTime'] as int? ?? 0;
+      return bTime.compareTo(aTime);
+    });
+    
+    _connection?.send({
+      'action': 'history_data',
+      'period': period,
+      'history': allHistory,
+    });
+    
+    _addLog('Sent ${allHistory.length} history trades');
   }
 
   void _regenerateRoom() async {

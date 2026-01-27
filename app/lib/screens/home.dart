@@ -12,6 +12,7 @@ import 'new_order.dart';
 import 'account.dart';
 import 'settings/settings.dart';
 import 'chart.dart';
+import 'history.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -30,6 +31,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final ValueNotifier<List<Map<String, dynamic>>> _positionsNotifier =
       ValueNotifier<List<Map<String, dynamic>>>([]);
   final StreamController<Map<String, dynamic>> _chartDataController =
+      StreamController<Map<String, dynamic>>.broadcast();
+  final StreamController<Map<String, dynamic>> _historyDataController =
       StreamController<Map<String, dynamic>>.broadcast();
   Map<String, String> _accountNames = {};
   String? _mainAccountNum;
@@ -270,6 +273,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _chartDataController.add(message);
         break;
 
+      case 'history_data':
+        // Forward history data via stream
+        _historyDataController.add(message);
+        break;
+
       case 'pong':
         break;
     }
@@ -321,6 +329,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       'action': 'get_chart_data',
       'symbol': symbol,
       'timeframe': timeframe,
+      'terminalIndex': terminalIndex,
+    });
+  }
+
+  void _requestHistory(String period, int? terminalIndex) {
+    _connection.send({
+      'action': 'get_history',
+      'period': period,
       'terminalIndex': terminalIndex,
     });
   }
@@ -461,6 +477,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _accountsNotifier.dispose();
     _positionsNotifier.dispose();
     _chartDataController.close();
+    _historyDataController.close();
     super.dispose();
   }
 
@@ -567,6 +584,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             tooltip: 'Chart',
           ),
           IconButton(
+            icon: const Icon(Icons.history, color: AppColors.primary),
+            onPressed: _openHistory,
+            tooltip: 'Trade History',
+          ),
+          IconButton(
             icon: const Icon(Icons.settings, color: AppColors.primary),
             onPressed: _openAccountSettings,
             tooltip: 'Account Settings',
@@ -598,6 +620,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           lotRatios: _lotRatios,
           preferredPairs: _preferredPairs,
           onPlaceOrder: _placeOrder,
+        ),
+      ),
+    );
+  }
+
+  void _openHistory() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => HistoryScreen(
+          accountNames: _accountNames,
+          historyDataStream: _historyDataController.stream,
+          onRequestHistory: _requestHistory,
+          includeCommissionSwap: _includeCommissionSwap,
         ),
       ),
     );

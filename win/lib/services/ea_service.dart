@@ -260,6 +260,44 @@ class EAService {
     }
   }
 
+  /// Get closed positions history
+  Future<List<Map<String, dynamic>>> getHistory(String period, int terminalIndex) async {
+    if (_commonDataPath == null) return [];
+    
+    // Send get_history command to EA
+    await sendCommandToTerminal(terminalIndex, {
+      'action': 'get_history',
+      'period': period,
+    });
+    
+    // Wait a moment for EA to write the file
+    await Future.delayed(const Duration(milliseconds: 300));
+    
+    // Read the history file
+    final filePath = '$_commonDataPath\\Files\\$_bridgeFolder\\history_$terminalIndex.json';
+    final file = File(filePath);
+    
+    if (!await file.exists()) return [];
+    
+    try {
+      final content = await _readFileSafe(file);
+      if (content == null || content.isEmpty) return [];
+      
+      final data = jsonDecode(content) as Map<String, dynamic>;
+      final history = data['history'] as List<dynamic>? ?? [];
+      
+      return history.map((item) {
+        final map = Map<String, dynamic>.from(item as Map);
+        map['terminalIndex'] = terminalIndex;
+        map['account'] = data['account'];
+        return map;
+      }).toList();
+    } catch (e) {
+      onLog?.call('Error reading history: $e');
+      return [];
+    }
+  }
+
   /// Poll for account status updates
   Future<void> _pollAccountStatus() async {
     final accounts = await getAccounts();
