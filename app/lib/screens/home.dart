@@ -391,6 +391,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     required double lots,
     required double? tp,
     required double? sl,
+    required double? price,
     required List<int> accountIndices,
     required bool useRatios,
     required bool applySuffix,
@@ -431,6 +432,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         'lots': adjustedLots,
         'tp': tp ?? 0,
         'sl': sl ?? 0,
+        'price': price ?? 0,
         'targetIndex': index,
         'magic': magic,
       });

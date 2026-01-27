@@ -27,6 +27,7 @@ class AccountDetailScreen extends StatefulWidget {
     required double lots,
     required double? tp,
     required double? sl,
+    required double? price,
     required List<int> accountIndices,
     required bool useRatios,
     required bool applySuffix,

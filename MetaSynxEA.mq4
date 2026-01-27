@@ -214,24 +214,32 @@ void WritePositions()
          if(!first) json += ",";
          first = false;
          
-         double currentPrice = OrderType() == OP_BUY ? 
-            MarketInfo(OrderSymbol(), MODE_BID) : MarketInfo(OrderSymbol(), MODE_ASK);
+         int orderType = OrderType();
+         bool isPending = (orderType >= OP_BUYLIMIT);
+         
+         double currentPrice = 0;
+         if(!isPending)
+         {
+            currentPrice = orderType == OP_BUY ? 
+               MarketInfo(OrderSymbol(), MODE_BID) : MarketInfo(OrderSymbol(), MODE_ASK);
+         }
          
          json += "{";
          json += "\"ticket\":" + IntegerToString(OrderTicket()) + ",";
          json += "\"symbol\":\"" + OrderSymbol() + "\",";
-         json += "\"type\":\"" + GetOrderTypeString(OrderType()) + "\",";
+         json += "\"type\":\"" + GetOrderTypeString(orderType) + "\",";
          json += "\"lots\":" + DoubleToString(OrderLots(), 2) + ",";
          json += "\"openPrice\":" + DoubleToString(OrderOpenPrice(), 5) + ",";
          json += "\"currentPrice\":" + DoubleToString(currentPrice, 5) + ",";
          json += "\"sl\":" + DoubleToString(OrderStopLoss(), 5) + ",";
          json += "\"tp\":" + DoubleToString(OrderTakeProfit(), 5) + ",";
-         json += "\"profit\":" + DoubleToString(OrderProfit(), 2) + ",";
-         json += "\"swap\":" + DoubleToString(OrderSwap(), 2) + ",";
-         json += "\"commission\":" + DoubleToString(OrderCommission(), 2) + ",";
+         json += "\"profit\":" + DoubleToString(isPending ? 0 : OrderProfit(), 2) + ",";
+         json += "\"swap\":" + DoubleToString(isPending ? 0 : OrderSwap(), 2) + ",";
+         json += "\"commission\":" + DoubleToString(isPending ? 0 : OrderCommission(), 2) + ",";
          json += "\"openTime\":\"" + TimeToString(OrderOpenTime(), TIME_DATE|TIME_SECONDS) + "\",";
          json += "\"comment\":\"" + OrderComment() + "\",";
-         json += "\"magic\":" + IntegerToString(OrderMagicNumber());
+         json += "\"magic\":" + IntegerToString(OrderMagicNumber()) + ",";
+         json += "\"isPending\":" + (isPending ? "true" : "false");
          json += "}";
       }
    }
@@ -397,6 +405,7 @@ void ProcessCommand(string jsonCommand)
          StringToDouble(ExtractJsonString(jsonCommand, "lots")),
          StringToDouble(ExtractJsonString(jsonCommand, "sl")),
          StringToDouble(ExtractJsonString(jsonCommand, "tp")),
+         StringToDouble(ExtractJsonString(jsonCommand, "price")),
          (int)StringToInteger(ExtractJsonString(jsonCommand, "magic"))
       );
    }
@@ -544,7 +553,7 @@ void WriteHistory(string period)
 //+------------------------------------------------------------------+
 //| Place order                                                       |
 //+------------------------------------------------------------------+
-void PlaceOrder(string symbol, string type, double lots, double sl, double tp, int magic)
+void PlaceOrder(string symbol, string type, double lots, double sl, double tp, double pendingPrice, int magic)
 {
    // Ensure symbol is in Market Watch
    if(!SymbolSelect(symbol, true))
@@ -559,10 +568,17 @@ void PlaceOrder(string symbol, string type, double lots, double sl, double tp, i
    int orderType;
    double price;
    color arrowColor;
+   bool isPending = false;
    
+   // Market orders
    if(type == "buy") { orderType = OP_BUY; price = MarketInfo(symbol, MODE_ASK); arrowColor = clrGreen; }
    else if(type == "sell") { orderType = OP_SELL; price = MarketInfo(symbol, MODE_BID); arrowColor = clrRed; }
-   else { WriteResponse(false, "Invalid order type", 0); return; }
+   // Pending orders
+   else if(type == "buy_limit") { orderType = OP_BUYLIMIT; price = pendingPrice; arrowColor = clrGreen; isPending = true; }
+   else if(type == "sell_limit") { orderType = OP_SELLLIMIT; price = pendingPrice; arrowColor = clrRed; isPending = true; }
+   else if(type == "buy_stop") { orderType = OP_BUYSTOP; price = pendingPrice; arrowColor = clrGreen; isPending = true; }
+   else if(type == "sell_stop") { orderType = OP_SELLSTOP; price = pendingPrice; arrowColor = clrRed; isPending = true; }
+   else { WriteResponse(false, "Invalid order type: " + type, 0); return; }
    
    // Check if symbol data is available
    if(MarketInfo(symbol, MODE_BID) == 0)
@@ -577,6 +593,13 @@ void PlaceOrder(string symbol, string type, double lots, double sl, double tp, i
       }
    }
    
+   // For pending orders, validate the price
+   if(isPending && pendingPrice <= 0)
+   {
+      WriteResponse(false, "Invalid pending order price", 0);
+      return;
+   }
+   
    double minLot = MarketInfo(symbol, MODE_MINLOT);
    double maxLot = MarketInfo(symbol, MODE_MAXLOT);
    double lotStep = MarketInfo(symbol, MODE_LOTSTEP);
@@ -589,7 +612,8 @@ void PlaceOrder(string symbol, string type, double lots, double sl, double tp, i
    
    int ticket = OrderSend(symbol, orderType, lots, price, 30, sl, tp, "MetaSynx", magic, 0, arrowColor);
    
-   if(ticket > 0) { WriteResponse(true, "Order placed", ticket); Print("Order placed: ", ticket); }
+   string orderTypeStr = isPending ? type : (type == "buy" ? "market buy" : "market sell");
+   if(ticket > 0) { WriteResponse(true, "Order placed", ticket); Print("Order placed (", orderTypeStr, "): ", ticket); }
    else { int err = GetLastError(); WriteResponse(false, "Error " + IntegerToString(err), 0); Print("Order failed: ", err); }
 }
 
@@ -744,6 +768,10 @@ string GetOrderTypeString(int type)
    {
       case OP_BUY: return "buy";
       case OP_SELL: return "sell";
+      case OP_BUYLIMIT: return "buy_limit";
+      case OP_SELLLIMIT: return "sell_limit";
+      case OP_BUYSTOP: return "buy_stop";
+      case OP_SELLSTOP: return "sell_stop";
       default: return "unknown";
    }
 }

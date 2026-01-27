@@ -18,11 +18,11 @@ class NewOrderScreen extends StatefulWidget {
     required double lots,
     required double? tp,
     required double? sl,
+    required double? price,
     required List<int> accountIndices,
     required bool useRatios,
     required bool applySuffix,
-  })
-  onPlaceOrder;
+  }) onPlaceOrder;
 
   const NewOrderScreen({
     super.key,
@@ -47,24 +47,18 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
   final _lotsController = TextEditingController(text: '0.01');
   final _tpController = TextEditingController();
   final _slController = TextEditingController();
+  final _priceController = TextEditingController();
 
   String _orderType = 'buy';
+  String _executionMode = 'market'; // market, limit, stop
   late Set<int> _selectedAccountIndices;
   bool _isPlacing = false;
   bool _applySuffix = true; // Whether to apply broker suffix to symbol
 
   // Default pairs if none selected in settings
   static const List<String> _defaultPairs = [
-    'EURUSD',
-    'GBPUSD',
-    'USDJPY',
-    'USDCHF',
-    'AUDUSD',
-    'USDCAD',
-    'NZDUSD',
-    'XAUUSD',
-    'XAGUSD',
-    'BTCUSD',
+    'EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF', 'AUDUSD',
+    'USDCAD', 'NZDUSD', 'XAUUSD', 'XAGUSD', 'BTCUSD',
   ];
 
   List<String> get _displayPairs {
@@ -93,25 +87,25 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
     _selectedAccountIndices = widget.accounts
         .map((a) => a['index'] as int)
         .toSet();
-
+    
     // Set initial order type if provided
     if (widget.initialOrderType != null) {
       _orderType = widget.initialOrderType!;
     }
-
+    
     // Set initial lots if provided, otherwise load from preferences
     if (widget.initialLots != null && widget.initialLots!.isNotEmpty) {
       _lotsController.text = widget.initialLots!;
     } else {
       _loadSavedLots();
     }
-
+    
     // Set initial symbol if provided, detecting and stripping suffix
     if (widget.initialSymbol != null && widget.initialSymbol!.isNotEmpty) {
       _setSymbolWithSuffixDetection(widget.initialSymbol!);
     }
   }
-
+  
   Future<void> _loadSavedLots() async {
     final prefs = await SharedPreferences.getInstance();
     final savedLots = prefs.getString('last_lots');
@@ -119,29 +113,25 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
       _lotsController.text = savedLots;
     }
   }
-
+  
   Future<void> _saveLots() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('last_lots', _lotsController.text);
   }
-
+  
   void _setSymbolWithSuffixDetection(String symbol) {
     // Check if symbol ends with any configured suffix
     String? detectedSuffix;
     for (final suffix in widget.symbolSuffixes.values) {
-      if (suffix.isNotEmpty &&
-          symbol.toUpperCase().endsWith(suffix.toUpperCase())) {
+      if (suffix.isNotEmpty && symbol.toUpperCase().endsWith(suffix.toUpperCase())) {
         detectedSuffix = suffix;
         break;
       }
     }
-
+    
     if (detectedSuffix != null) {
       // Strip suffix and enable suffix toggle
-      final baseSymbol = symbol.substring(
-        0,
-        symbol.length - detectedSuffix.length,
-      );
+      final baseSymbol = symbol.substring(0, symbol.length - detectedSuffix.length);
       _symbolController.text = baseSymbol;
       _applySuffix = true;
     } else {
@@ -156,6 +146,7 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
     _lotsController.dispose();
     _tpController.dispose();
     _slController.dispose();
+    _priceController.dispose();
     super.dispose();
   }
 
@@ -207,6 +198,7 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
     final lotsText = _lotsController.text.trim();
     final tpText = _tpController.text.trim();
     final slText = _slController.text.trim();
+    final priceText = _priceController.text.trim();
 
     if (symbol.isEmpty) {
       _showError('Please enter a symbol');
@@ -224,20 +216,40 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
       return;
     }
 
+    // For limit/stop orders, price is required
+    double? price;
+    if (_executionMode != 'market') {
+      price = double.tryParse(priceText);
+      if (price == null || price <= 0) {
+        _showError('Please enter a valid price for ${_executionMode} order');
+        return;
+      }
+    }
+
     final tp = tpText.isNotEmpty ? double.tryParse(tpText) : null;
     final sl = slText.isNotEmpty ? double.tryParse(slText) : null;
 
     setState(() => _isPlacing = true);
-
+    
     // Save the lots for next time
     _saveLots();
 
+    // Determine order type string based on execution mode
+    // market: buy, sell
+    // limit: buy_limit, sell_limit
+    // stop: buy_stop, sell_stop
+    String orderType = _orderType;
+    if (_executionMode != 'market') {
+      orderType = '${_orderType}_${_executionMode}';
+    }
+
     widget.onPlaceOrder(
       symbol: symbol,
-      type: _orderType,
+      type: orderType,
       lots: lots,
       tp: tp,
       sl: sl,
+      price: price,
       accountIndices: _selectedAccountIndices.toList(),
       useRatios: _useRatios,
       applySuffix: _applySuffix,
@@ -245,10 +257,12 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
 
     // Show confirmation and go back
     final ratioMsg = _useRatios ? ' (with lot ratios)' : '';
+    final modeMsg = _executionMode != 'market' ? ' ${_executionMode.toUpperCase()}' : '';
+    final priceMsg = price != null ? ' @ $price' : '';
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          'Placing ${_orderType.toUpperCase()} $lots $symbol on ${_selectedAccountIndices.length} account(s)$ratioMsg',
+          'Placing ${_orderType.toUpperCase()}$modeMsg $lots $symbol$priceMsg on ${_selectedAccountIndices.length} account(s)$ratioMsg',
         ),
         backgroundColor: AppColors.primary,
       ),
@@ -259,7 +273,10 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
 
   void _showError(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), backgroundColor: Colors.red.shade700),
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red.shade700,
+      ),
     );
   }
 
@@ -298,82 +315,95 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
 
               const SizedBox(height: 24),
 
+              // Execution mode (Market/Limit/Stop)
+              const Text('EXECUTION', style: AppTextStyles.label),
+              const SizedBox(height: 8),
+              _buildExecutionModeToggle(),
+
+              // Price field (only for limit/stop orders)
+              if (_executionMode != 'market') ...[
+                const SizedBox(height: 16),
+                const Text('PRICE', style: AppTextStyles.label),
+                const SizedBox(height: 8),
+                _buildPendingPriceField(),
+              ],
+
+              const SizedBox(height: 24),
+
               // Accounts selection
               Text(
                 'ACCOUNTS (${_selectedAccountIndices.length}/${widget.accounts.length})',
                 style: AppTextStyles.label,
               ),
-              const SizedBox(height: 8),
-              _buildAccountsSelection(),
+            const SizedBox(height: 8),
+            _buildAccountsSelection(),
 
-              const SizedBox(height: 24),
+            const SizedBox(height: 24),
 
-              // Lots
-              const Text('LOT SIZE', style: AppTextStyles.label),
-              const SizedBox(height: 8),
-              _buildLotsField(),
+            // Lots
+            const Text('LOT SIZE', style: AppTextStyles.label),
+            const SizedBox(height: 8),
+            _buildLotsField(),
 
-              const SizedBox(height: 24),
+            const SizedBox(height: 24),
 
-              // TP/SL row
-              Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('TAKE PROFIT', style: AppTextStyles.label),
-                        const SizedBox(height: 8),
-                        _buildPriceField(_tpController, 'Optional'),
-                      ],
-                    ),
+            // TP/SL row
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('TAKE PROFIT', style: AppTextStyles.label),
+                      const SizedBox(height: 8),
+                      _buildPriceField(_tpController, 'Optional'),
+                    ],
                   ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('STOP LOSS', style: AppTextStyles.label),
-                        const SizedBox(height: 8),
-                        _buildPriceField(_slController, 'Optional'),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-
-              const SizedBox(height: 32),
-
-              // Place Order button
-              SizedBox(
-                width: double.infinity,
-                height: 56,
-                child: ElevatedButton(
-                  onPressed: _isPlacing ? null : _placeOrder,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: _orderType == 'buy'
-                        ? AppColors.primary
-                        : AppColors.error,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                  child: _isPlacing
-                      ? const CircularProgressIndicator(color: Colors.white)
-                      : Text(
-                          _orderType == 'buy'
-                              ? 'PLACE BUY ORDER'
-                              : 'PLACE SELL ORDER',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
                 ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('STOP LOSS', style: AppTextStyles.label),
+                      const SizedBox(height: 8),
+                      _buildPriceField(_slController, 'Optional'),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 32),
+
+            // Place Order button
+            SizedBox(
+              width: double.infinity,
+              height: 56,
+              child: ElevatedButton(
+                onPressed: _isPlacing ? null : _placeOrder,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _orderType == 'buy' 
+                      ? AppColors.primary 
+                      : AppColors.error,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                child: _isPlacing
+                    ? const CircularProgressIndicator(color: Colors.white)
+                    : Text(
+                        _orderType == 'buy' ? 'PLACE BUY ORDER' : 'PLACE SELL ORDER',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
               ),
-            ],
-          ),
+            ),
+          ],
+        ),
         ),
       ),
     );
@@ -389,19 +419,14 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
             textCapitalization: TextCapitalization.characters,
             decoration: InputDecoration(
               hintText: 'e.g. EURUSD',
-              hintStyle: TextStyle(
-                color: AppColors.textSecondary.withOpacity(0.5),
-              ),
+              hintStyle: TextStyle(color: AppColors.textSecondary.withOpacity(0.5)),
               filled: true,
               fillColor: AppColors.surface,
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
                 borderSide: BorderSide.none,
               ),
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 16,
-                vertical: 16,
-              ),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
             ),
           ),
         ),
@@ -443,9 +468,7 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
                 Text(
                   'Suffix',
                   style: TextStyle(
-                    color: _applySuffix
-                        ? Colors.white
-                        : AppColors.textSecondary,
+                    color: _applySuffix ? Colors.white : AppColors.textSecondary,
                     fontSize: 13,
                     fontWeight: FontWeight.w500,
                   ),
@@ -507,18 +530,14 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
               child: Container(
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 decoration: BoxDecoration(
-                  color: _orderType == 'buy'
-                      ? AppColors.primary
-                      : Colors.transparent,
+                  color: _orderType == 'buy' ? AppColors.primary : Colors.transparent,
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Center(
                   child: Text(
                     'BUY',
                     style: TextStyle(
-                      color: _orderType == 'buy'
-                          ? Colors.black
-                          : AppColors.textSecondary,
+                      color: _orderType == 'buy' ? Colors.black : AppColors.textSecondary,
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
                     ),
@@ -533,18 +552,14 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
               child: Container(
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 decoration: BoxDecoration(
-                  color: _orderType == 'sell'
-                      ? AppColors.error
-                      : Colors.transparent,
+                  color: _orderType == 'sell' ? AppColors.error : Colors.transparent,
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Center(
                   child: Text(
                     'SELL',
                     style: TextStyle(
-                      color: _orderType == 'sell'
-                          ? Colors.white
-                          : AppColors.textSecondary,
+                      color: _orderType == 'sell' ? Colors.white : AppColors.textSecondary,
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
                     ),
@@ -558,9 +573,71 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
     );
   }
 
+  Widget _buildExecutionModeToggle() {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          _buildExecutionModeButton('market', 'MARKET'),
+          _buildExecutionModeButton('limit', 'LIMIT'),
+          _buildExecutionModeButton('stop', 'STOP'),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildExecutionModeButton(String mode, String label) {
+    final isSelected = _executionMode == mode;
+    return Expanded(
+      child: GestureDetector(
+        onTap: () => setState(() => _executionMode = mode),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          decoration: BoxDecoration(
+            color: isSelected ? AppColors.primary.withOpacity(0.2) : Colors.transparent,
+            borderRadius: BorderRadius.circular(12),
+            border: isSelected ? Border.all(color: AppColors.primary, width: 1) : null,
+          ),
+          child: Center(
+            child: Text(
+              label,
+              style: TextStyle(
+                color: isSelected ? AppColors.primary : AppColors.textSecondary,
+                fontSize: 14,
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPendingPriceField() {
+    return TextField(
+      controller: _priceController,
+      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      style: const TextStyle(color: Colors.white, fontSize: 16),
+      decoration: InputDecoration(
+        hintText: 'Enter price',
+        hintStyle: const TextStyle(color: AppColors.textMuted),
+        filled: true,
+        fillColor: AppColors.surface,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide.none,
+        ),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+      ),
+    );
+  }
+
   Widget _buildAccountsSelection() {
     final hasMainAccount = widget.mainAccountNum != null;
-
+    
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -570,13 +647,13 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
             margin: const EdgeInsets.only(bottom: 12),
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: _useRatios
-                  ? AppColors.primaryWithOpacity(0.1)
+              color: _useRatios 
+                  ? AppColors.primaryWithOpacity(0.1) 
                   : Colors.orange.withOpacity(0.1),
               borderRadius: BorderRadius.circular(8),
               border: Border.all(
-                color: _useRatios
-                    ? AppColors.primaryWithOpacity(0.3)
+                color: _useRatios 
+                    ? AppColors.primaryWithOpacity(0.3) 
                     : Colors.orange.withOpacity(0.3),
               ),
             ),
@@ -595,9 +672,7 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
                         ? 'Lot ratios enabled. Lots will be adjusted per account based on your settings.'
                         : 'Select main account to use lot ratios, or select one account to use exact lot size.',
                     style: TextStyle(
-                      color: _useRatios
-                          ? AppColors.textSecondary
-                          : Colors.orange.shade200,
+                      color: _useRatios ? AppColors.textSecondary : Colors.orange.shade200,
                       fontSize: 11,
                       height: 1.3,
                     ),
@@ -637,7 +712,7 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
               ],
             ),
           ),
-
+        
         // Account buttons - sort with main account first
         Wrap(
           spacing: 8,
@@ -646,9 +721,7 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
             final index = account['index'] as int;
             final accountNum = account['account'] as String? ?? 'Unknown';
             final customName = widget.accountNames[accountNum];
-            final displayName = (customName != null && customName.isNotEmpty)
-                ? customName
-                : accountNum;
+            final displayName = (customName != null && customName.isNotEmpty) ? customName : accountNum;
             final hasCustomName = customName != null && customName.isNotEmpty;
             final isSelected = _selectedAccountIndices.contains(index);
             final isMainAccount = accountNum == widget.mainAccountNum;
@@ -656,14 +729,9 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
             return GestureDetector(
               onTap: () => _toggleAccountSelection(index),
               child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 10,
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 decoration: BoxDecoration(
-                  color: isSelected
-                      ? AppColors.primaryWithOpacity(0.2)
-                      : AppColors.surface,
+                  color: isSelected ? AppColors.primaryWithOpacity(0.2) : AppColors.surface,
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(
                     color: isSelected ? AppColors.primary : AppColors.border,
@@ -675,9 +743,7 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
                   children: [
                     Icon(
                       isSelected ? Icons.check_circle : Icons.circle_outlined,
-                      color: isSelected
-                          ? AppColors.primary
-                          : AppColors.textSecondary,
+                      color: isSelected ? AppColors.primary : AppColors.textSecondary,
                       size: 18,
                     ),
                     const SizedBox(width: 8),
@@ -690,9 +756,7 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
                             Text(
                               displayName,
                               style: TextStyle(
-                                color: isSelected
-                                    ? Colors.white
-                                    : AppColors.textSecondary,
+                                color: isSelected ? Colors.white : AppColors.textSecondary,
                                 fontSize: 13,
                                 fontWeight: FontWeight.w600,
                               ),
@@ -700,22 +764,15 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
                             if (isMainAccount) ...[
                               const SizedBox(width: 6),
                               Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 4,
-                                  vertical: 1,
-                                ),
+                                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
                                 decoration: BoxDecoration(
-                                  color: isSelected
-                                      ? AppColors.primary
-                                      : AppColors.textMuted,
+                                  color: isSelected ? AppColors.primary : AppColors.textMuted,
                                   borderRadius: BorderRadius.circular(3),
                                 ),
                                 child: Text(
                                   'MAIN',
                                   style: TextStyle(
-                                    color: isSelected
-                                        ? Colors.black
-                                        : AppColors.surface,
+                                    color: isSelected ? Colors.black : AppColors.surface,
                                     fontSize: 8,
                                     fontWeight: FontWeight.bold,
                                   ),
@@ -728,8 +785,8 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
                           Text(
                             accountNum,
                             style: TextStyle(
-                              color: isSelected
-                                  ? AppColors.textSecondary
+                              color: isSelected 
+                                  ? AppColors.textSecondary 
                                   : AppColors.textMuted,
                               fontSize: 10,
                             ),
@@ -802,9 +859,7 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
           Expanded(
             child: TextField(
               controller: _lotsController,
-              keyboardType: const TextInputType.numberWithOptions(
-                decimal: true,
-              ),
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
               textAlign: TextAlign.center,
               style: const TextStyle(
                 color: Colors.white,
@@ -872,10 +927,7 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
           borderRadius: BorderRadius.circular(12),
           borderSide: BorderSide.none,
         ),
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 16,
-          vertical: 14,
-        ),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       ),
     );
   }

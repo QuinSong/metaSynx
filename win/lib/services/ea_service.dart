@@ -167,6 +167,7 @@ class EAService {
     required double lots,
     double? sl,
     double? tp,
+    double? price,
     int? targetIndex,
     bool targetAll = false,
     int? magic,
@@ -178,6 +179,7 @@ class EAService {
       'lots': lots,
       'sl': sl ?? 0,
       'tp': tp ?? 0,
+      'price': price ?? 0,
       'magic': magic ?? DateTime.now().millisecondsSinceEpoch % 2147483647,
     };
 
