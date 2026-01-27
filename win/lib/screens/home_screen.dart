@@ -198,14 +198,19 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _handleClosePosition(Map<String, dynamic> message) async {
     final ticket = message['ticket'] as int?;
     final terminalIndex = message['terminalIndex'] as int?;
+    final lots = (message['lots'] as num?)?.toDouble();
     
     if (ticket == null || terminalIndex == null) {
       _addLog('Close position: missing ticket or terminalIndex');
       return;
     }
     
-    _addLog('Closing position: ticket=$ticket on terminal $terminalIndex');
-    await _eaService.closePosition(ticket, terminalIndex);
+    if (lots != null) {
+      _addLog('Partial close: ticket=$ticket, lots=$lots on terminal $terminalIndex');
+    } else {
+      _addLog('Closing position: ticket=$ticket on terminal $terminalIndex');
+    }
+    await _eaService.closePosition(ticket, terminalIndex, lots: lots);
     _addLog('Close command sent for ticket=$ticket');
   }
 

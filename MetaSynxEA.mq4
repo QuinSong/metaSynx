@@ -422,8 +422,23 @@ void ProcessCommand(string jsonCommand)
    else if(action == "close_position")
    {
       int ticket = (int)StringToInteger(ExtractJsonString(jsonCommand, "ticket"));
-      Print("CLOSE COMMAND: ticket=", ticket);
-      ClosePosition(ticket);
+      string lotsStr = ExtractJsonString(jsonCommand, "lots");
+      double lots = 0;
+      if(StringLen(lotsStr) > 0 && lotsStr != "null")
+      {
+         lots = StringToDouble(lotsStr);
+      }
+      
+      if(lots > 0)
+      {
+         Print("PARTIAL CLOSE COMMAND: ticket=", ticket, " lots=", lots);
+         ClosePosition(ticket, lots);
+      }
+      else
+      {
+         Print("CLOSE COMMAND: ticket=", ticket);
+         ClosePosition(ticket, 0); // 0 means close all
+      }
    }
    else if(action == "modify_position")
    {
@@ -641,9 +656,10 @@ void PlaceOrder(string symbol, string type, double lots, double sl, double tp, d
 }
 
 //+------------------------------------------------------------------+
-//| Close position                                                    |
+//| Close position (full or partial)                                  |
+//| closeLots: 0 = close all, >0 = close specified lots               |
 //+------------------------------------------------------------------+
-void ClosePosition(int ticket)
+void ClosePosition(int ticket, double closeLots = 0)
 {
    if(!OrderSelect(ticket, SELECT_BY_TICKET))
    {
@@ -662,19 +678,51 @@ void ClosePosition(int ticket)
    RefreshRates();
    
    string symbol = OrderSymbol();
-   double lots = OrderLots();
+   double positionLots = OrderLots();
    int orderType = OrderType();
    double price = orderType == OP_BUY ? MarketInfo(symbol, MODE_BID) : MarketInfo(symbol, MODE_ASK);
    price = NormalizeDouble(price, (int)MarketInfo(symbol, MODE_DIGITS));
    
-   Print("CLOSING: ticket=", ticket, " symbol=", symbol, " lots=", lots, " price=", price);
+   // Determine lots to close
+   double lotsToClose;
+   if(closeLots <= 0 || closeLots >= positionLots)
+   {
+      lotsToClose = positionLots; // Close all
+   }
+   else
+   {
+      // Partial close - normalize to lot step
+      double lotStep = MarketInfo(symbol, MODE_LOTSTEP);
+      double minLot = MarketInfo(symbol, MODE_MINLOT);
+      
+      lotsToClose = MathFloor(closeLots / lotStep) * lotStep;
+      if(lotsToClose < minLot) lotsToClose = minLot;
+      
+      // Ensure remaining lots won't be less than min lot
+      double remainingLots = positionLots - lotsToClose;
+      if(remainingLots > 0 && remainingLots < minLot)
+      {
+         // Close all instead to avoid invalid remaining position
+         lotsToClose = positionLots;
+      }
+   }
    
-   bool result = OrderClose(ticket, lots, price, 30, clrYellow);
+   Print("CLOSING: ticket=", ticket, " symbol=", symbol, " lots=", lotsToClose, "/", positionLots, " price=", price);
+   
+   bool result = OrderClose(ticket, lotsToClose, price, 30, clrYellow);
    
    if(result)
    {
-      Print("CLOSE SUCCESS: ", ticket);
-      WriteResponse(true, "Closed", ticket);
+      if(lotsToClose < positionLots)
+      {
+         Print("PARTIAL CLOSE SUCCESS: ", ticket, " closed=", lotsToClose, " remaining=", positionLots - lotsToClose);
+         WriteResponse(true, "Partially closed", ticket);
+      }
+      else
+      {
+         Print("CLOSE SUCCESS: ", ticket);
+         WriteResponse(true, "Closed", ticket);
+      }
    }
    else
    {

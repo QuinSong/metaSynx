@@ -2,7 +2,7 @@ import os
 import time
 
 
-msg = 'added nav bar'
+msg = 'starting with partial close 2'
 
 
 os.system('git add .')

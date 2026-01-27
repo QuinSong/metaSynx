@@ -194,13 +194,22 @@ class EAService {
     }
   }
 
-  /// Close a position
-  Future<bool> closePosition(int ticket, int terminalIndex) async {
-    onLog?.call('Closing position: ticket=$ticket');
-    return await sendCommandToTerminal(terminalIndex, {
-      'action': 'close_position',
-      'ticket': ticket,
-    });
+  /// Close a position (full or partial)
+  Future<bool> closePosition(int ticket, int terminalIndex, {double? lots}) async {
+    if (lots != null) {
+      onLog?.call('Partial close: ticket=$ticket, lots=$lots');
+      return await sendCommandToTerminal(terminalIndex, {
+        'action': 'close_position',
+        'ticket': ticket,
+        'lots': lots,
+      });
+    } else {
+      onLog?.call('Closing position: ticket=$ticket');
+      return await sendCommandToTerminal(terminalIndex, {
+        'action': 'close_position',
+        'ticket': ticket,
+      });
+    }
   }
 
   /// Modify a position
