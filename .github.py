@@ -2,7 +2,7 @@ import os
 import time
 
 
-msg = 'make get_chart_data async'
+msg = 'done - starting with history screen'
 
 
 os.system('git add .')

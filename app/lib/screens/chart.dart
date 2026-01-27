@@ -12,7 +12,8 @@ class ChartScreen extends StatefulWidget {
   final List<Map<String, dynamic>> accounts;
   final String? initialSymbol;
   final void Function(int ticket, int terminalIndex) onClosePosition;
-  final void Function(int ticket, int terminalIndex, double? sl, double? tp) onModifyPosition;
+  final void Function(int ticket, int terminalIndex, double? sl, double? tp)
+  onModifyPosition;
   final Map<String, String> accountNames;
   final String? mainAccountNum;
   final bool includeCommissionSwap;
@@ -21,7 +22,8 @@ class ChartScreen extends StatefulWidget {
   final void Function(bool) onConfirmBeforeCloseChanged;
   // MT4 chart data
   final Stream<Map<String, dynamic>>? chartDataStream;
-  final void Function(String symbol, String timeframe, int terminalIndex)? onRequestChartData;
+  final void Function(String symbol, String timeframe, int terminalIndex)?
+  onRequestChartData;
   // New order
   final Map<String, String> symbolSuffixes;
   final Map<String, double> lotRatios;
@@ -35,7 +37,8 @@ class ChartScreen extends StatefulWidget {
     required List<int> accountIndices,
     required bool useRatios,
     required bool applySuffix,
-  }) onPlaceOrder;
+  })
+  onPlaceOrder;
 
   const ChartScreen({
     super.key,
@@ -78,15 +81,27 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
   bool _showBidAskLines = false; // B/A toggle
   double? _currentBid;
   double? _currentAsk;
-  
+
   // Search overlay
   bool _showSearchOverlay = false;
   List<String> _recentSearches = [];
-  
+
   // Preferred symbols (common forex pairs)
   final List<String> _preferredSymbols = [
-    'EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF', 'AUDUSD', 'USDCAD', 'NZDUSD',
-    'EURGBP', 'EURJPY', 'GBPJPY', 'XAUUSD', 'XAGUSD', 'BTCUSD', 'ETHUSD',
+    'EURUSD',
+    'GBPUSD',
+    'USDJPY',
+    'USDCHF',
+    'AUDUSD',
+    'USDCAD',
+    'NZDUSD',
+    'EURGBP',
+    'EURJPY',
+    'GBPJPY',
+    'XAUUSD',
+    'XAGUSD',
+    'BTCUSD',
+    'ETHUSD',
   ];
 
   final List<Map<String, String>> _timeframes = [
@@ -100,27 +115,26 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
     {'label': '1W', 'value': 'W'},
   ];
 
-  bool get _useMT4Data => 
-      widget.chartDataStream != null && 
-      widget.onRequestChartData != null;
+  bool get _useMT4Data =>
+      widget.chartDataStream != null && widget.onRequestChartData != null;
 
   @override
   void initState() {
     super.initState();
-    
+
     // Register for app lifecycle changes
     WidgetsBinding.instance.addObserver(this);
-    
+
     // Listen for position changes to update lines on chart
     widget.positionsNotifier.addListener(_onPositionsChanged);
-    
+
     // Initialize WebView controller first (synchronous)
     _initWebView();
-    
+
     // Then load preferences (async)
     _loadSavedPreferences();
   }
-  
+
   void _onPositionsChanged() {
     // Update position lines on the chart when positions change
     if (_hasReceivedData) {
@@ -132,12 +146,14 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
-    
+
     switch (state) {
       case AppLifecycleState.resumed:
         // App came back to foreground - resume polling
         _isAppInForeground = true;
-        if (_useMT4Data && _selectedAccountIndex != null && _chartPollTimer == null) {
+        if (_useMT4Data &&
+            _selectedAccountIndex != null &&
+            _chartPollTimer == null) {
           _startChartPolling();
         }
         break;
@@ -154,26 +170,27 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
 
   Future<void> _loadSavedPreferences() async {
     final prefs = await SharedPreferences.getInstance();
-    
+
     // Load saved account index
     final savedAccountIndex = prefs.getInt('chart_account_index');
     final savedSymbol = prefs.getString('chart_symbol');
     final savedTimeframe = prefs.getString('chart_timeframe');
     final savedShowBidAsk = prefs.getBool('chart_show_bid_ask') ?? false;
-    
+
     // Load recent searches
     _recentSearches = prefs.getStringList('chart_recent_searches') ?? [];
-    
+
     // Load B/A preference
     _showBidAskLines = savedShowBidAsk;
-    
+
     // Validate and set account index
-    if (savedAccountIndex != null && savedAccountIndex < widget.accounts.length) {
+    if (savedAccountIndex != null &&
+        savedAccountIndex < widget.accounts.length) {
       _selectedAccountIndex = savedAccountIndex;
     } else if (widget.accounts.isNotEmpty) {
       _selectedAccountIndex = 0;
     }
-    
+
     // Validate and set symbol
     if (widget.initialSymbol != null && widget.initialSymbol!.isNotEmpty) {
       // If opened with a specific symbol, use that
@@ -184,32 +201,36 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
       if (allSymbols.contains(savedSymbol.toUpperCase())) {
         _currentSymbol = savedSymbol;
       } else if (widget.positions.isNotEmpty) {
-        _currentSymbol = widget.positions.first['symbol'] as String? ?? 'EURUSD';
+        _currentSymbol =
+            widget.positions.first['symbol'] as String? ?? 'EURUSD';
       }
     } else if (widget.positions.isNotEmpty) {
       _currentSymbol = widget.positions.first['symbol'] as String? ?? 'EURUSD';
     }
-    
+
     // Validate and set timeframe
-    if (savedTimeframe != null && _timeframes.any((tf) => tf['value'] == savedTimeframe)) {
+    if (savedTimeframe != null &&
+        _timeframes.any((tf) => tf['value'] == savedTimeframe)) {
       _currentInterval = savedTimeframe;
     }
-    
+
     // Detect if current symbol has suffix and update state accordingly
     _symbolController.text = _currentSymbol;
-    
+
     // Listen for chart data updates via stream
     if (_useMT4Data) {
-      _chartDataSubscription = widget.chartDataStream!.listen(_onChartDataReceived);
+      _chartDataSubscription = widget.chartDataStream!.listen(
+        _onChartDataReceived,
+      );
     }
-    
+
     // Add focus listener to show/hide overlay
     _symbolFocusNode.addListener(_onFocusChange);
-    
+
     // Load chart with restored settings
     setState(() {});
     _controller.loadHtmlString(_buildLightweightChartsHtml());
-    
+
     // Save current choices
     _savePreferences();
   }
@@ -282,18 +303,22 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
     // Chart is initialized, now start polling for data from MT4
     if (_useMT4Data && _selectedAccountIndex != null) {
       _hasReceivedData = false;
-      
+
       // Apply saved B/A preference
       if (_showBidAskLines) {
         _controller.runJavaScript('showBidAskLines(null, null);');
       }
-      
+
       // Request initial chart data
-      widget.onRequestChartData!(_currentSymbol, _currentInterval, _selectedAccountIndex!);
-      
+      widget.onRequestChartData!(
+        _currentSymbol,
+        _currentInterval,
+        _selectedAccountIndex!,
+      );
+
       // Start polling for updates every 500ms
       _startChartPolling();
-      
+
       // Set a timeout - if no data after 5 seconds, show error
       Future.delayed(const Duration(seconds: 5), () {
         if (mounted && !_hasReceivedData && _isLoading) {
@@ -318,12 +343,19 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
   void _startChartPolling() {
     // Don't start polling if app is in background
     if (!_isAppInForeground) return;
-    
+
     _stopChartPolling();
     _chartPollTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
       // Only poll if app is in foreground, we have a valid account, and MT4 data is enabled
-      if (_isAppInForeground && _selectedAccountIndex != null && _useMT4Data && widget.onRequestChartData != null) {
-        widget.onRequestChartData!(_currentSymbol, _currentInterval, _selectedAccountIndex!);
+      if (_isAppInForeground &&
+          _selectedAccountIndex != null &&
+          _useMT4Data &&
+          widget.onRequestChartData != null) {
+        widget.onRequestChartData!(
+          _currentSymbol,
+          _currentInterval,
+          _selectedAccountIndex!,
+        );
       }
     });
   }
@@ -337,28 +369,32 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
     // Verify data matches current request (ignore stale responses)
     final dataSymbol = data['symbol'] as String?;
     final dataTimeframe = data['timeframe']?.toString();
-    
+
     if (dataSymbol != null && dataSymbol != _currentSymbol) return;
     if (dataTimeframe != null && dataTimeframe != _currentInterval) return;
-    
+
     // Extract bid/ask
     final bid = data['bid'];
     final ask = data['ask'];
     if (bid != null && ask != null) {
-      _currentBid = (bid is num) ? bid.toDouble() : double.tryParse(bid.toString());
-      _currentAsk = (ask is num) ? ask.toDouble() : double.tryParse(ask.toString());
-      
+      _currentBid = (bid is num)
+          ? bid.toDouble()
+          : double.tryParse(bid.toString());
+      _currentAsk = (ask is num)
+          ? ask.toDouble()
+          : double.tryParse(ask.toString());
+
       // Always update bid/ask (this updates spread display and lines if visible)
       if (_currentBid != null && _currentAsk != null) {
         _controller.runJavaScript('updateBidAsk($_currentBid, $_currentAsk);');
       }
     }
-    
+
     final candles = data['candles'] as List?;
     if (candles != null && candles.isNotEmpty) {
       final candlesJson = _candlesToJson(candles);
       _controller.runJavaScript('setChartData($candlesJson);');
-      
+
       if (!_hasReceivedData) {
         _hasReceivedData = true;
         setState(() => _isLoading = false);
@@ -388,17 +424,18 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
   void _handlePositionTap(String ticketStr) {
     final ticket = int.tryParse(ticketStr);
     if (ticket == null) return;
-    
-    final position = widget.positions.firstWhere(
+
+    // Use live positions data, not the static widget.positions
+    final position = widget.positionsNotifier.value.firstWhere(
       (p) => _parseInt(p['ticket']) == ticket,
       orElse: () => <String, dynamic>{},
     );
-    
+
     if (position.isEmpty) return;
-    
+
     // Stop polling while on another screen
     _stopChartPolling();
-    
+
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -448,14 +485,16 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
 
   List<Map<String, dynamic>> _getPositionsForSymbol() {
     return _getCurrentPositions().where((p) {
-      final symbolMatch = (p['symbol']?.toString().toUpperCase() ?? '') == _currentSymbol.toUpperCase();
+      final symbolMatch =
+          (p['symbol']?.toString().toUpperCase() ?? '') ==
+          _currentSymbol.toUpperCase();
       if (!symbolMatch) return false;
-      
+
       if (_selectedAccountIndex != null) {
         final terminalIndex = _parseInt(p['terminalIndex']);
         return terminalIndex == _selectedAccountIndex;
       }
-      
+
       return true;
     }).toList();
   }
@@ -471,9 +510,9 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
   String _buildPositionLinesJs() {
     final positions = _getPositionsForSymbol();
     if (positions.isEmpty) return '';
-    
+
     final lines = StringBuffer();
-    
+
     for (int i = 0; i < positions.length; i++) {
       final pos = positions[i];
       final type = (pos['type']?.toString() ?? '').toLowerCase();
@@ -481,21 +520,28 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
       final sl = _parseDouble(pos['sl']);
       final tp = _parseDouble(pos['tp']);
       final lots = _parseDouble(pos['lots']);
+      final ticket = _parseInt(pos['ticket']);
       final isBuy = type == 'buy';
       final entryColor = isBuy ? '#00D4AA' : '#FF5252';
-      
-      // Entry line - store reference
+
+      // Store for tap detection
+      lines.writeln(
+        'positionPrices.push({ ticket: $ticket, price: $openPrice });',
+      );
+
+      // Entry line - no title, price box only on right
       lines.writeln('''
         positionLines.push(series.createPriceLine({
           price: $openPrice,
           color: '$entryColor',
-          lineWidth: 2,
+          lineWidth: 1,
           lineStyle: 0,
           axisLabelVisible: true,
-          title: '${isBuy ? "BUY" : "SELL"} ${lots.toStringAsFixed(2)}',
+          title: '',
         }));
+        createPositionLabel($openPrice, '${isBuy ? "BUY" : "SELL"} ${lots.toStringAsFixed(2)}', '$entryColor', '${isBuy ? "entry-buy" : "entry-sell"}', $ticket);
       ''');
-      
+
       // SL line
       if (sl > 0) {
         lines.writeln('''
@@ -505,11 +551,12 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
             lineWidth: 1,
             lineStyle: 2,
             axisLabelVisible: true,
-            title: 'SL',
+            title: '',
           }));
+          createPositionLabel($sl, 'SL', '#FF5252', 'sl', $ticket);
         ''');
       }
-      
+
       // TP line
       if (tp > 0) {
         lines.writeln('''
@@ -519,19 +566,20 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
             lineWidth: 1,
             lineStyle: 2,
             axisLabelVisible: true,
-            title: 'TP',
+            title: '',
           }));
+          createPositionLabel($tp, 'TP', '#00D4AA', 'tp', $ticket);
         ''');
       }
     }
-    
+
     return lines.toString();
   }
-  
+
   String _buildPositionsJson() {
     final positions = _getPositionsForSymbol();
     if (positions.isEmpty) return '[]';
-    
+
     final buffer = StringBuffer('[');
     for (int i = 0; i < positions.length; i++) {
       if (i > 0) buffer.write(',');
@@ -543,14 +591,17 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
       final lots = _parseDouble(pos['lots']);
       final ticket = _parseInt(pos['ticket']);
       final isBuy = type == 'buy';
-      buffer.write('{"ticket":$ticket,"openPrice":$openPrice,"sl":$sl,"tp":$tp,"lots":$lots,"isBuy":$isBuy}');
+      buffer.write(
+        '{"ticket":$ticket,"openPrice":$openPrice,"sl":$sl,"tp":$tp,"lots":$lots,"isBuy":$isBuy}',
+      );
     }
     buffer.write(']');
     return buffer.toString();
   }
 
   String _getBrokerName() {
-    if (_selectedAccountIndex == null || _selectedAccountIndex! >= widget.accounts.length) {
+    if (_selectedAccountIndex == null ||
+        _selectedAccountIndex! >= widget.accounts.length) {
       return '';
     }
     final account = widget.accounts[_selectedAccountIndex!];
@@ -656,7 +707,8 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
     #spread-label {
       position: absolute;
       top: 48px;
-      left: 95px;
+      left: 10px;
+      margin-left: 0px;
       color: #9CA3AF;
       font-family: -apple-system, BlinkMacSystemFont, sans-serif;
       font-size: 12px;
@@ -667,10 +719,49 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
       border: 1px solid rgba(255, 255, 255, 0.1);
       z-index: 10;
     }
+    #position-labels {
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 100%;
+      pointer-events: none;
+      z-index: 5;
+    }
+    .pos-label {
+      position: absolute;
+      left: 6px;
+      padding: 2px 6px;
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+      font-size: 11px;
+      font-weight: 600;
+      border-radius: 3px;
+      white-space: nowrap;
+      transform: translateY(-50%);
+      pointer-events: auto;
+      cursor: pointer;
+    }
+    .pos-label.entry-buy {
+      background: rgba(0, 212, 170, 0.2);
+      color: #00D4AA;
+    }
+    .pos-label.entry-sell {
+      background: rgba(255, 82, 82, 0.2);
+      color: #FF5252;
+    }
+    .pos-label.sl {
+      background: rgba(255, 82, 82, 0.2);
+      color: #FF5252;
+    }
+    .pos-label.tp {
+      background: rgba(0, 212, 170, 0.2);
+      color: #00D4AA;
+    }
   </style>
 </head>
 <body>
   <div id="chart"></div>
+  <div id="position-labels"></div>
   <div id="symbol-label">$_currentSymbol${brokerName.isNotEmpty ? ' <span style="font-size: 12px; color: #9CA3AF;">$brokerName</span>' : ''}</div>
   <div id="timeframe-label" onclick="toggleTimeframeDropdown(event)">
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#00D4AA" stroke-width="2">
@@ -717,11 +808,26 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
         if (el.dataset.value === value) el.classList.add('selected');
       });
       
+      // Reposition spread label
+      positionSpreadLabel();
+      
       // Notify Flutter
       if (window.TimeframeSelect) {
         window.TimeframeSelect.postMessage(value);
       }
     }
+    
+    function positionSpreadLabel() {
+      const tfLabel = document.getElementById('timeframe-label');
+      const spreadLabel = document.getElementById('spread-label');
+      if (tfLabel && spreadLabel) {
+        const tfWidth = tfLabel.offsetWidth;
+        spreadLabel.style.left = (10 + tfWidth + 6) + 'px';
+      }
+    }
+    
+    // Position spread label on load
+    setTimeout(positionSpreadLabel, 100);
     
     // Close dropdown when clicking elsewhere
     document.addEventListener('click', function(e) {
@@ -929,17 +1035,17 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
       currentBid = bid;
       currentAsk = ask;
       
-      // Update spread display
+      // Update spread display - show as integer points
       if (bid && ask && bid > 0) {
-        // Calculate spread in points
         const spread = ask - bid;
-        // Determine pip size based on price level
-        let pipSize = 0.0001; // Default for most forex
-        if (bid > 10) pipSize = 0.01; // Indices, JPY pairs
-        else if (bid < 0.1) pipSize = 0.00001; // Some crypto
+        // Determine multiplier based on price level to get integer points
+        let multiplier = 100000; // Default for most forex (5 decimals)
+        if (bid > 1000) multiplier = 100; // Gold, indices
+        else if (bid > 10) multiplier = 1000; // JPY pairs
+        else if (bid < 0.1) multiplier = 1000000; // Some crypto
         
-        const spreadPips = Math.round(spread / pipSize);
-        document.getElementById('spread-label').textContent = 'Spread ' + spreadPips;
+        const spreadPoints = Math.round(spread * multiplier);
+        document.getElementById('spread-label').textContent = 'Spread ' + spreadPoints;
       }
       
       if (bidAskVisible) {
@@ -989,6 +1095,9 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
       positionLines = [];
       positionPrices = [];
       
+      // Clear HTML labels
+      document.getElementById('position-labels').innerHTML = '';
+      
       // Create new position lines
       for (const pos of positions) {
         const entryColor = pos.isBuy ? '#00D4AA' : '#FF5252';
@@ -996,15 +1105,18 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
         
         positionPrices.push({ ticket: pos.ticket, price: pos.openPrice });
         
-        // Entry line
+        // Entry line - no title, price box only on right
         positionLines.push(series.createPriceLine({
           price: pos.openPrice,
           color: entryColor,
-          lineWidth: 2,
+          lineWidth: 1,
           lineStyle: 0,
           axisLabelVisible: true,
-          title: (pos.isBuy ? 'BUY ' : 'SELL ') + lotsStr,
+          title: '',
         }));
+        
+        // Create HTML label on left for entry
+        createPositionLabel(pos.openPrice, (pos.isBuy ? 'BUY ' : 'SELL ') + lotsStr, entryColor, pos.isBuy ? 'entry-buy' : 'entry-sell', pos.ticket);
         
         // SL line
         if (pos.sl > 0) {
@@ -1014,8 +1126,9 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
             lineWidth: 1,
             lineStyle: 2,
             axisLabelVisible: true,
-            title: 'SL',
+            title: '',
           }));
+          createPositionLabel(pos.sl, 'SL', '#FF5252', 'sl', pos.ticket);
         }
         
         // TP line
@@ -1026,11 +1139,48 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
             lineWidth: 1,
             lineStyle: 2,
             axisLabelVisible: true,
-            title: 'TP',
+            title: '',
           }));
+          createPositionLabel(pos.tp, 'TP', '#00D4AA', 'tp', pos.ticket);
         }
       }
     }
+    
+    function createPositionLabel(price, text, color, type, ticket) {
+      const label = document.createElement('div');
+      label.className = 'pos-label ' + type;
+      label.textContent = text;
+      label.style.color = color;
+      label.dataset.price = price;
+      label.dataset.ticket = ticket;
+      label.onclick = function() {
+        onPositionTap(ticket);
+      };
+      document.getElementById('position-labels').appendChild(label);
+      updateLabelPosition(label, price);
+    }
+    
+    function updateLabelPosition(label, price) {
+      const y = series.priceToCoordinate(price);
+      if (y !== null) {
+        label.style.top = y + 'px';
+        label.style.display = 'block';
+      } else {
+        label.style.display = 'none';
+      }
+    }
+    
+    function updateAllLabelPositions() {
+      const labels = document.querySelectorAll('.pos-label');
+      labels.forEach(label => {
+        const price = parseFloat(label.dataset.price);
+        updateLabelPosition(label, price);
+      });
+    }
+    
+    // Update label positions when chart scrolls/zooms
+    chart.timeScale().subscribeVisibleLogicalRangeChange(updateAllLabelPositions);
+    chart.subscribeCrosshairMove(updateAllLabelPositions);
     
     // Show loading state
     document.getElementById('loading').style.display = 'block';
@@ -1053,17 +1203,17 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
     setState(() {
       _showSearchOverlay = false;
     });
-    
+
     // Stop polling while switching symbols
     _stopChartPolling();
-    
+
     final symbol = _symbolController.text.trim().toUpperCase();
-    
+
     // Add to recent searches if not empty
     if (symbol.isNotEmpty) {
       _addToRecentSearches(symbol);
     }
-    
+
     setState(() {
       _currentSymbol = symbol;
       _isLoading = true;
@@ -1071,11 +1221,11 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
       _currentBid = null;
       _currentAsk = null;
     });
-    
+
     _savePreferences();
     _controller.loadHtmlString(_buildLightweightChartsHtml());
   }
-  
+
   void _onFocusChange() {
     if (_symbolFocusNode.hasFocus) {
       setState(() {
@@ -1083,31 +1233,33 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
       });
     }
   }
-  
+
   void _closeSearchOverlay() {
     _symbolFocusNode.unfocus();
     setState(() {
       _showSearchOverlay = false;
     });
   }
-  
+
   void _selectSymbol(String symbol) {
     _symbolController.text = symbol;
     _loadChart();
   }
-  
+
   void _toggleBidAskLines() {
     setState(() {
       _showBidAskLines = !_showBidAskLines;
     });
-    
+
     // Save preference
     _savePreferences();
-    
+
     if (_showBidAskLines) {
       // Show bid/ask lines with current values if available
       if (_currentBid != null && _currentAsk != null) {
-        _controller.runJavaScript('showBidAskLines($_currentBid, $_currentAsk);');
+        _controller.runJavaScript(
+          'showBidAskLines($_currentBid, $_currentAsk);',
+        );
       } else {
         _controller.runJavaScript('showBidAskLines(null, null);');
       }
@@ -1115,11 +1267,11 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
       _controller.runJavaScript('hideBidAskLines();');
     }
   }
-  
+
   void _openNewOrder(String orderType) {
     // Stop polling while on another screen
     _stopChartPolling();
-    
+
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -1139,10 +1291,16 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
       // Resume polling when returning to chart
       if (mounted && _isAppInForeground) {
         _startChartPolling();
+        // Force update position lines after a short delay to allow positions to refresh
+        Future.delayed(const Duration(milliseconds: 500), () {
+          if (mounted) {
+            _onPositionsChanged();
+          }
+        });
       }
     });
   }
-  
+
   Future<void> _addToRecentSearches(String symbol) async {
     _recentSearches.remove(symbol); // Remove if exists
     _recentSearches.insert(0, symbol); // Add to front
@@ -1152,7 +1310,7 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setStringList('chart_recent_searches', _recentSearches);
   }
-  
+
   Future<void> _clearRecentSearches() async {
     setState(() {
       _recentSearches = [];
@@ -1175,13 +1333,18 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
   }
 
   int _getPositionCountForSymbol(String symbol) {
-    return _getPositionsForAccount().where((p) => 
-      (p['symbol']?.toString().toUpperCase() ?? '') == symbol.toUpperCase()
-    ).length;
+    return _getPositionsForAccount()
+        .where(
+          (p) =>
+              (p['symbol']?.toString().toUpperCase() ?? '') ==
+              symbol.toUpperCase(),
+        )
+        .length;
   }
 
   String _getSelectedAccountName() {
-    if (_selectedAccountIndex == null || _selectedAccountIndex! >= widget.accounts.length) {
+    if (_selectedAccountIndex == null ||
+        _selectedAccountIndex! >= widget.accounts.length) {
       return 'Account';
     }
     final account = widget.accounts[_selectedAccountIndex!];
@@ -1190,7 +1353,9 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
   }
 
   String _getTimeframeLabel() {
-    return _timeframes.firstWhere((tf) => tf['value'] == _currentInterval)['label']!;
+    return _timeframes.firstWhere(
+      (tf) => tf['value'] == _currentInterval,
+    )['label']!;
   }
 
   String _buildTimeframeOptionsHtml() {
@@ -1262,7 +1427,11 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
               ),
             ],
             const SizedBox(width: 4),
-            const Icon(Icons.keyboard_arrow_down, color: AppColors.textSecondary, size: 18),
+            const Icon(
+              Icons.keyboard_arrow_down,
+              color: AppColors.textSecondary,
+              size: 18,
+            ),
           ],
         ),
       ),
@@ -1314,12 +1483,19 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
                     child: TextField(
                       controller: _symbolController,
                       focusNode: _symbolFocusNode,
-                      style: const TextStyle(color: Colors.white, fontSize: 15, height: 1),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 15,
+                        height: 1,
+                      ),
                       textCapitalization: TextCapitalization.characters,
                       textAlignVertical: TextAlignVertical.center,
                       decoration: const InputDecoration(
                         hintText: 'Symbol',
-                        hintStyle: TextStyle(color: AppColors.textSecondary, height: 1),
+                        hintStyle: TextStyle(
+                          color: AppColors.textSecondary,
+                          height: 1,
+                        ),
                         border: InputBorder.none,
                         contentPadding: EdgeInsets.symmetric(horizontal: 12),
                         isDense: true,
@@ -1342,7 +1518,11 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(color: AppColors.primary, width: 1),
                     ),
-                    child: const Icon(Icons.search, color: AppColors.primary, size: 20),
+                    child: const Icon(
+                      Icons.search,
+                      color: AppColors.primary,
+                      size: 20,
+                    ),
                   ),
                 ),
               ],
@@ -1356,7 +1536,10 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
                   children: [
                     // Dropdown selectors row: Account | Symbol
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
                       color: AppColors.background,
                       child: Row(
                         children: [
@@ -1365,209 +1548,255 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
                             Expanded(
                               child: _buildPopupMenuButton(
                                 value: _getSelectedAccountName(),
-                                items: List.generate(widget.accounts.length, (index) {
+                                items: List.generate(widget.accounts.length, (
+                                  index,
+                                ) {
                                   final account = widget.accounts[index];
-                                  final accountNum = account['account']?.toString() ?? '';
-                                  final accountName = widget.accountNames[accountNum] ?? accountNum;
-                                  final isSelected = _selectedAccountIndex == index;
+                                  final accountNum =
+                                      account['account']?.toString() ?? '';
+                                  final accountName =
+                                      widget.accountNames[accountNum] ??
+                                      accountNum;
+                                  final isSelected =
+                                      _selectedAccountIndex == index;
                                   return PopupMenuItem<int>(
                                     value: index,
-                                child: Text(
-                                  accountName,
-                                  style: TextStyle(
-                                    color: isSelected ? AppColors.primary : Colors.white,
-                                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                                  ),
-                                ),
-                              );
-                            }),
-                            onSelected: (value) {
-                              setState(() {
-                                _selectedAccountIndex = value;
-                              });
-                              _loadChart();
-                            },
-                          ),
-                        ),
-                      if (widget.accounts.isNotEmpty)
-                        const SizedBox(width: 8),
-                      // Symbol dropdown
-                      if (uniqueSymbols.isNotEmpty)
-                        Expanded(
-                          child: _buildPopupMenuButton(
-                            value: _currentSymbol,
-                            badge: _getPositionCountForSymbol(_currentSymbol),
-                            items: uniqueSymbols.map((symbol) {
-                              final isSelected = symbol.toUpperCase() == _currentSymbol.toUpperCase();
-                              final posCount = _getPositionCountForSymbol(symbol);
-                              return PopupMenuItem<String>(
-                                value: symbol,
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Text(
-                                      symbol,
+                                    child: Text(
+                                      accountName,
                                       style: TextStyle(
-                                        color: isSelected ? AppColors.primary : Colors.white,
-                                        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                        color: isSelected
+                                            ? AppColors.primary
+                                            : Colors.white,
+                                        fontWeight: isSelected
+                                            ? FontWeight.bold
+                                            : FontWeight.normal,
                                       ),
                                     ),
-                                    if (posCount > 0)
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                        decoration: BoxDecoration(
-                                          color: AppColors.primary.withOpacity(0.2),
-                                          borderRadius: BorderRadius.circular(10),
+                                  );
+                                }),
+                                onSelected: (value) {
+                                  setState(() {
+                                    _selectedAccountIndex = value;
+                                  });
+                                  _loadChart();
+                                },
+                              ),
+                            ),
+                          if (widget.accounts.isNotEmpty)
+                            const SizedBox(width: 8),
+                          // Symbol dropdown
+                          if (uniqueSymbols.isNotEmpty)
+                            Expanded(
+                              child: _buildPopupMenuButton(
+                                value: _currentSymbol,
+                                badge: _getPositionCountForSymbol(
+                                  _currentSymbol,
+                                ),
+                                items: uniqueSymbols.map((symbol) {
+                                  final isSelected =
+                                      symbol.toUpperCase() ==
+                                      _currentSymbol.toUpperCase();
+                                  final posCount = _getPositionCountForSymbol(
+                                    symbol,
+                                  );
+                                  return PopupMenuItem<String>(
+                                    value: symbol,
+                                    child: Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Text(
+                                          symbol,
+                                          style: TextStyle(
+                                            color: isSelected
+                                                ? AppColors.primary
+                                                : Colors.white,
+                                            fontWeight: isSelected
+                                                ? FontWeight.bold
+                                                : FontWeight.normal,
+                                          ),
                                         ),
-                                        child: Text(
-                                          '$posCount',
-                                          style: const TextStyle(
-                                            color: AppColors.primary,
-                                            fontSize: 11,
-                                            fontWeight: FontWeight.bold,
+                                        if (posCount > 0)
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 6,
+                                              vertical: 2,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: AppColors.primary
+                                                  .withOpacity(0.2),
+                                              borderRadius:
+                                                  BorderRadius.circular(10),
+                                            ),
+                                            child: Text(
+                                              '$posCount',
+                                              style: const TextStyle(
+                                                color: AppColors.primary,
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                                  );
+                                }).toList(),
+                                onSelected: (value) {
+                                  _selectSymbol(value);
+                                },
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+
+                    // Chart with buy/sell buttons overlay
+                    Expanded(
+                      child: Stack(
+                        children: [
+                          WebViewWidget(controller: _controller),
+                          if (_isLoading)
+                            Container(
+                              color: AppColors.background,
+                              child: const Center(
+                                child: CircularProgressIndicator(
+                                  color: AppColors.primary,
+                                ),
+                              ),
+                            ),
+                          // B/A toggle - top right
+                          Positioned(
+                            top: 10,
+                            right: 10,
+                            child: GestureDetector(
+                              onTap: _toggleBidAskLines,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 6,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: AppColors.surface,
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                    color: _showBidAskLines
+                                        ? AppColors.primary
+                                        : AppColors.border,
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      _showBidAskLines
+                                          ? Icons.check_box
+                                          : Icons.check_box_outline_blank,
+                                      color: _showBidAskLines
+                                          ? AppColors.primary
+                                          : AppColors.textSecondary,
+                                      size: 16,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      'B/A',
+                                      style: TextStyle(
+                                        color: _showBidAskLines
+                                            ? AppColors.primary
+                                            : AppColors.textSecondary,
+                                        fontSize: 12,
+                                        fontWeight: _showBidAskLines
+                                            ? FontWeight.bold
+                                            : FontWeight.w500,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                          // Buy/Sell buttons at bottom (hidden when keyboard is open)
+                          if (MediaQuery.of(context).viewInsets.bottom == 0)
+                            Positioned(
+                              left: 16,
+                              right: 16,
+                              bottom: 36,
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: GestureDetector(
+                                      onTap: () => _openNewOrder('buy'),
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          vertical: 12,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: AppColors.primary,
+                                          borderRadius: BorderRadius.circular(
+                                            8,
+                                          ),
+                                        ),
+                                        child: const Center(
+                                          child: Text(
+                                            'BUY',
+                                            style: TextStyle(
+                                              color: Colors.black,
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 14,
+                                            ),
                                           ),
                                         ),
                                       ),
-                                  ],
-                                ),
-                              );
-                            }).toList(),
-                            onSelected: (value) {
-                              _selectSymbol(value);
-                            },
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-                
-                // Chart with buy/sell buttons overlay
-                Expanded(
-                  child: Stack(
-                    children: [
-                      WebViewWidget(controller: _controller),
-                      if (_isLoading)
-                        Container(
-                          color: AppColors.background,
-                          child: const Center(
-                            child: CircularProgressIndicator(color: AppColors.primary),
-                          ),
-                        ),
-                      // B/A toggle - top right
-                      Positioned(
-                        top: 10,
-                        right: 10,
-                        child: GestureDetector(
-                          onTap: _toggleBidAskLines,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: AppColors.surface,
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(
-                                color: _showBidAskLines 
-                                    ? AppColors.primary 
-                                    : AppColors.border,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: GestureDetector(
+                                      onTap: () => _openNewOrder('sell'),
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          vertical: 12,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFFFF5252),
+                                          borderRadius: BorderRadius.circular(
+                                            8,
+                                          ),
+                                        ),
+                                        child: const Center(
+                                          child: Text(
+                                            'SELL',
+                                            style: TextStyle(
+                                              color: Colors.white,
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 14,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  _showBidAskLines ? Icons.check_box : Icons.check_box_outline_blank,
-                                  color: _showBidAskLines ? AppColors.primary : AppColors.textSecondary,
-                                  size: 16,
-                                ),
-                                const SizedBox(width: 4),
-                                Text(
-                                  'B/A',
-                                  style: TextStyle(
-                                    color: _showBidAskLines ? AppColors.primary : AppColors.textSecondary,
-                                    fontSize: 12,
-                                    fontWeight: _showBidAskLines ? FontWeight.bold : FontWeight.w500,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
+                        ],
                       ),
-                      // Buy/Sell buttons at bottom (hidden when keyboard is open)
-                      if (MediaQuery.of(context).viewInsets.bottom == 0)
-                        Positioned(
-                          left: 16,
-                          right: 16,
-                          bottom: 36,
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: GestureDetector(
-                                  onTap: () => _openNewOrder('buy'),
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(vertical: 12),
-                                    decoration: BoxDecoration(
-                                      color: AppColors.primary,
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                    child: const Center(
-                                      child: Text(
-                                        'BUY',
-                                        style: TextStyle(
-                                          color: Colors.black,
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 14,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: GestureDetector(
-                                  onTap: () => _openNewOrder('sell'),
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(vertical: 12),
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xFFFF5252),
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                    child: const Center(
-                                      child: Text(
-                                        'SELL',
-                                        style: TextStyle(
-                                          color: Colors.white,
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 14,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
-          ),
-          
-          // Search overlay
-          if (_showSearchOverlay)
-            _buildSearchOverlay(),
+              ),
+
+              // Search overlay
+              if (_showSearchOverlay) _buildSearchOverlay(),
             ],
           ),
         );
       },
     );
   }
-  
+
   Widget _buildSearchOverlay() {
     final brokerName = _getBrokerName();
-    
+
     return GestureDetector(
       onTap: _closeSearchOverlay,
       child: Container(
@@ -1594,14 +1823,17 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
                     const Spacer(),
                     IconButton(
                       onPressed: _closeSearchOverlay,
-                      icon: const Icon(Icons.close, color: AppColors.textSecondary),
+                      icon: const Icon(
+                        Icons.close,
+                        color: AppColors.textSecondary,
+                      ),
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(),
                     ),
                   ],
                 ),
               ),
-              
+
               // Recent searches
               if (_recentSearches.isNotEmpty) ...[
                 Padding(
@@ -1640,7 +1872,10 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
                       return GestureDetector(
                         onTap: () => _selectSymbol(symbol),
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 8,
+                          ),
                           decoration: BoxDecoration(
                             color: AppColors.surface,
                             borderRadius: BorderRadius.circular(8),
@@ -1648,7 +1883,10 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
                           ),
                           child: Text(
                             symbol,
-                            style: const TextStyle(color: Colors.white, fontSize: 13),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 13,
+                            ),
                           ),
                         ),
                       );
@@ -1656,7 +1894,7 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
                   ),
                 ),
               ],
-              
+
               // Preferred symbols
               const Padding(
                 padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
@@ -1680,7 +1918,10 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
                       return GestureDetector(
                         onTap: () => _selectSymbol(symbol),
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 8,
+                          ),
                           decoration: BoxDecoration(
                             color: AppColors.surface,
                             borderRadius: BorderRadius.circular(8),
@@ -1688,7 +1929,10 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
                           ),
                           child: Text(
                             symbol,
-                            style: const TextStyle(color: Colors.white, fontSize: 13),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 13,
+                            ),
                           ),
                         ),
                       );

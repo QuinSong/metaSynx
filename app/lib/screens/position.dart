@@ -538,35 +538,8 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
     );
   }
 
-  String _stripSuffix(String symbol) {
-    // Common base symbols - if symbol starts with one of these, strip anything after
-    final baseSymbols = [
-      'XAUUSD', 'XAGUSD', 'EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF', 'USDCAD',
-      'AUDUSD', 'NZDUSD', 'EURGBP', 'EURJPY', 'GBPJPY', 'BTCUSD', 'ETHUSD',
-      'US30', 'US500', 'NAS100', 'UK100', 'GER40', 'FRA40', 'JPN225',
-    ];
-    
-    for (final base in baseSymbols) {
-      if (symbol.toUpperCase().startsWith(base)) {
-        return base;
-      }
-    }
-    
-    // If no known base found, try to strip common suffixes
-    final suffixPatterns = ['.', '-', '_', '#'];
-    for (final pattern in suffixPatterns) {
-      final index = symbol.indexOf(pattern);
-      if (index > 0) {
-        return symbol.substring(0, index);
-      }
-    }
-    
-    return symbol;
-  }
-
   void _openChart() {
     final symbol = widget.position['symbol'] as String? ?? '';
-    final cleanSymbol = _stripSuffix(symbol);
     
     Navigator.push(
       context,
@@ -575,7 +548,7 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
           positions: widget.positionsNotifier.value,
           positionsNotifier: widget.positionsNotifier,
           accounts: widget.accounts,
-          initialSymbol: cleanSymbol,
+          initialSymbol: symbol,
           onClosePosition: widget.onClosePosition,
           onModifyPosition: widget.onModifyPosition,
           accountNames: widget.accountNames,

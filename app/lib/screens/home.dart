@@ -20,7 +20,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final relay.RelayConnection _connection = relay.RelayConnection();
   relay.ConnectionState _connectionState = relay.ConnectionState.disconnected;
   bool _bridgeConnected = false;
@@ -40,13 +40,38 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _showPLPercent = false;
   bool _confirmBeforeClose = true;
   Timer? _refreshTimer;
+  bool _isAppInForeground = true;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadSettings();
     _setupConnection();
     _tryAutoConnect();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    
+    switch (state) {
+      case AppLifecycleState.resumed:
+        // App came to foreground - resume polling
+        _isAppInForeground = true;
+        if (_bridgeConnected) {
+          _startRefreshTimer();
+        }
+        break;
+      case AppLifecycleState.paused:
+      case AppLifecycleState.inactive:
+      case AppLifecycleState.hidden:
+      case AppLifecycleState.detached:
+        // App went to background - stop polling
+        _isAppInForeground = false;
+        _stopRefreshTimer();
+        break;
+    }
   }
 
   Future<void> _loadSettings() async {
@@ -141,18 +166,29 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _startAccountsRefresh() {
+    // Don't start if app is in background
+    if (!_isAppInForeground) return;
+    
     _refreshTimer?.cancel();
     _refreshTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (_bridgeConnected) {
+      if (_bridgeConnected && _isAppInForeground) {
         _requestAccounts();
         _requestAllPositions();
       }
     });
   }
+  
+  void _startRefreshTimer() {
+    _startAccountsRefresh();
+  }
 
   void _stopAccountsRefresh() {
     _refreshTimer?.cancel();
     _refreshTimer = null;
+  }
+  
+  void _stopRefreshTimer() {
+    _stopAccountsRefresh();
   }
 
   Future<void> _tryAutoConnect() async {
@@ -419,6 +455,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _connection.disconnect();
     _stopAccountsRefresh();
     _accountsNotifier.dispose();
