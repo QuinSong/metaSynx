@@ -2,7 +2,7 @@ import os
 import time
 
 
-msg = 'adding risk calculator 1'
+msg = 'adding risk calculator 2'
 
 
 os.system('git add .')
