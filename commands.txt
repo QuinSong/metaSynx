@@ -27,3 +27,44 @@ sudo certbot certonly \
 scp server/websocket_relay.py quinsong@34.147.82.105:/tmp/
 ssh quinsong@34.147.82.105 "sudo mv /tmp/websocket_relay.py /opt/metasynx/ && sudo systemctl restart metasynx-relay"
 curl https://server1.metasynx.io/health
+
+
+
+Trading Communities (Best)
+
+Reddit: r/Forex, r/algotrading, r/metatrader - post "Looking for beta testers for MT4 mobile app"
+Forex Factory forums - huge MT4 community
+MQL5.com community - MT4/MT5 developers and traders
+Discord servers: Search for Forex/trading Discord communities
+
+Social Media
+
+Twitter/X: Post with hashtags #forex #mt4 #trading #fintech
+YouTube: Comment on MT4 tutorial videos, or make a short demo video
+
+Product Launch Sites
+
+BetaList.com - list your app for beta testers
+Product Hunt (for later public launch)
+
+My suggestion for 30 testers:
+
+Post on Reddit r/Forex and r/metatrader (free, targeted) - aim for 15-20
+Post on Forex Factory forum - aim for 10-15
+Create a simple landing page with signup form (Google Form works)
+
+What to ask testers:
+
+Email
+How many MT4 accounts they run
+What broker(s)
+Willing to give feedback via Discord/email?
+
+Suggested Next Steps
+
+Now: Create a simple landing page + Google Form for tester signups
+Now: Post in 2-3 trading communities
+While waiting for testers: Add simple "tester code" to bridge (I give you a code like BETA2026, testers enter it to unlock)
+Later: Build proper auth when you have paying customers
+
+Want me to help draft a Reddit/forum post to attract testers? Or shall we add the simple tester code to the bridge first?

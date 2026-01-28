@@ -44,12 +44,6 @@ class _HomeScreenState extends State<HomeScreen> {
     _connection = RelayConnection(
       onStatusChanged: (status) {
         setState(() => _status = status);
-        // Only log important status changes
-        if (status == ConnectionStatus.connected) {
-          _addLog('Connected to relay server');
-        } else if (status == ConnectionStatus.error) {
-          _addLog('Connection error');
-        }
       },
       onPairingStatusChanged: (mobileConnected, deviceName) {
         setState(() {
@@ -58,7 +52,8 @@ class _HomeScreenState extends State<HomeScreen> {
         });
         if (mobileConnected) {
           _addLog('📱 Mobile connected: $deviceName');
-        } else {
+        } else if (_logs.isNotEmpty) {
+          // Only log disconnect if we've had activity (not on startup)
           _addLog('📱 Mobile disconnected');
         }
       },
