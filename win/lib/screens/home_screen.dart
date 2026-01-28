@@ -32,9 +32,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _initializeServices() async {
-    _addLog('Initializing MetaSynx Bridge...');
-
-    // Initialize EA Service
+    // Initialize EA Service (silent)
     _eaService.onLog = _addLog;
     _eaService.onAccountsUpdated = (accounts) {
       setState(() => _accounts = accounts);
@@ -46,7 +44,12 @@ class _HomeScreenState extends State<HomeScreen> {
     _connection = RelayConnection(
       onStatusChanged: (status) {
         setState(() => _status = status);
-        _addLog('Connection status: ${status.name}');
+        // Only log important status changes
+        if (status == ConnectionStatus.connected) {
+          _addLog('Connected to relay server');
+        } else if (status == ConnectionStatus.error) {
+          _addLog('Connection error');
+        }
       },
       onPairingStatusChanged: (mobileConnected, deviceName) {
         setState(() {
@@ -54,9 +57,9 @@ class _HomeScreenState extends State<HomeScreen> {
           _mobileDeviceName = deviceName;
         });
         if (mobileConnected) {
-          _addLog('Mobile paired: $deviceName');
+          _addLog('📱 Mobile connected: $deviceName');
         } else {
-          _addLog('Mobile disconnected');
+          _addLog('📱 Mobile disconnected');
         }
       },
       onMessageReceived: _handleMessage,
@@ -68,17 +71,14 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _createRoomAndConnect() async {
     setState(() => _status = ConnectionStatus.connecting);
-    _addLog('Creating relay room...');
 
     try {
       final credentials = await RoomService.createRoom();
       _roomId = credentials.roomId;
       _roomSecret = credentials.roomSecret;
-      _addLog('Room created: $_roomId');
 
       _qrData = RoomService.generateQrPayload(_roomId!, _roomSecret!);
       setState(() {});
-      _addLog('QR code generated');
 
       await _connection!.connect(_roomId!, _roomSecret!);
     } catch (e) {
@@ -89,11 +89,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _handleMessage(Map<String, dynamic> message) {
     final action = message['action'] as String?;
-    
-    // Only log non-polling actions
-    if (action != 'get_accounts' && action != 'get_positions' && action != 'ping' && action != 'get_chart_data') {
-      _addLog('Received: $action');
-    }
 
     switch (action) {
       case 'ping':
@@ -143,22 +138,23 @@ class _HomeScreenState extends State<HomeScreen> {
       case 'get_symbol_info':
         _handleGetSymbolInfo(message);
         break;
-
-      default:
-        _addLog('Unknown action: $action');
     }
+  }
+
+  String _getAccountName(int terminalIndex) {
+    if (terminalIndex < _accounts.length) {
+      final account = _accounts[terminalIndex];
+      return account['account'] as String? ?? 'Account $terminalIndex';
+    }
+    return 'Account $terminalIndex';
   }
 
   Future<void> _handleGetSymbolInfo(Map<String, dynamic> message) async {
     final symbol = message['symbol'] as String?;
     final terminalIndex = message['terminalIndex'] as int? ?? 0;
     
-    if (symbol == null || symbol.isEmpty) {
-      _addLog('Get symbol info: missing symbol');
-      return;
-    }
+    if (symbol == null || symbol.isEmpty) return;
     
-    _addLog('Getting symbol info: $symbol from terminal $terminalIndex');
     final info = await _eaService.getSymbolInfo(symbol, terminalIndex);
     
     if (info != null) {
@@ -167,9 +163,6 @@ class _HomeScreenState extends State<HomeScreen> {
         'symbol': symbol,
         ...info,
       });
-      _addLog('Symbol info sent: $symbol pipValue=${info['pipValue']}');
-    } else {
-      _addLog('Failed to get symbol info for $symbol');
     }
   }
 
@@ -208,7 +201,16 @@ class _HomeScreenState extends State<HomeScreen> {
     final targetAll = message['targetAll'] as bool? ?? false;
     final magic = message['magic'] as int?;
 
-    _addLog('Order: $symbol $type $lots lots${price != null && price > 0 ? ' @ $price' : ''} (magic: $magic)');
+    // Format order type nicely
+    final typeDisplay = type.replaceAll('_', ' ').toUpperCase();
+    final priceStr = price != null && price > 0 ? ' @ $price' : '';
+    
+    if (targetAll) {
+      _addLog('📈 $typeDisplay $symbol ${lots}L$priceStr → All accounts');
+    } else if (targetIndex != null) {
+      final accountName = _getAccountName(targetIndex);
+      _addLog('📈 $typeDisplay $symbol ${lots}L$priceStr → $accountName');
+    }
 
     await _eaService.placeOrder(
       symbol: symbol,
@@ -228,18 +230,15 @@ class _HomeScreenState extends State<HomeScreen> {
     final terminalIndex = message['terminalIndex'] as int?;
     final lots = (message['lots'] as num?)?.toDouble();
     
-    if (ticket == null || terminalIndex == null) {
-      _addLog('Close position: missing ticket or terminalIndex');
-      return;
-    }
+    if (ticket == null || terminalIndex == null) return;
     
+    final accountName = _getAccountName(terminalIndex);
     if (lots != null) {
-      _addLog('Partial close: ticket=$ticket, lots=$lots on terminal $terminalIndex');
+      _addLog('📉 Partial close #$ticket (${lots}L) → $accountName');
     } else {
-      _addLog('Closing position: ticket=$ticket on terminal $terminalIndex');
+      _addLog('📉 Close #$ticket → $accountName');
     }
     await _eaService.closePosition(ticket, terminalIndex, lots: lots);
-    _addLog('Close command sent for ticket=$ticket');
   }
 
   Future<void> _handleModifyPosition(Map<String, dynamic> message) async {
@@ -248,28 +247,22 @@ class _HomeScreenState extends State<HomeScreen> {
     final sl = (message['sl'] as num?)?.toDouble();
     final tp = (message['tp'] as num?)?.toDouble();
     
-    if (ticket == null || terminalIndex == null) {
-      _addLog('Modify position: missing ticket or terminalIndex');
-      return;
-    }
+    if (ticket == null || terminalIndex == null) return;
     
-    _addLog('Modifying position: ticket=$ticket on terminal $terminalIndex, SL=$sl, TP=$tp');
+    final accountName = _getAccountName(terminalIndex);
+    _addLog('✏️ Modify #$ticket → $accountName');
     await _eaService.modifyPosition(ticket, terminalIndex, sl: sl, tp: tp);
-    _addLog('Modify command sent for ticket=$ticket');
   }
 
   Future<void> _handleCancelOrder(Map<String, dynamic> message) async {
     final ticket = message['ticket'] as int?;
     final terminalIndex = message['terminalIndex'] as int?;
     
-    if (ticket == null || terminalIndex == null) {
-      _addLog('Cancel order: missing ticket or terminalIndex');
-      return;
-    }
+    if (ticket == null || terminalIndex == null) return;
     
-    _addLog('Cancelling order: ticket=$ticket on terminal $terminalIndex');
+    final accountName = _getAccountName(terminalIndex);
+    _addLog('❌ Cancel #$ticket → $accountName');
     await _eaService.cancelOrder(ticket, terminalIndex);
-    _addLog('Cancel command sent for ticket=$ticket');
   }
 
   Future<void> _handleModifyPending(Map<String, dynamic> message) async {
@@ -277,14 +270,11 @@ class _HomeScreenState extends State<HomeScreen> {
     final terminalIndex = message['terminalIndex'] as int?;
     final price = (message['price'] as num?)?.toDouble();
     
-    if (ticket == null || terminalIndex == null || price == null) {
-      _addLog('Modify pending: missing ticket, terminalIndex, or price');
-      return;
-    }
+    if (ticket == null || terminalIndex == null || price == null) return;
     
-    _addLog('Modifying pending order: ticket=$ticket, price=$price on terminal $terminalIndex');
+    final accountName = _getAccountName(terminalIndex);
+    _addLog('✏️ Modify pending #$ticket @ $price → $accountName');
     await _eaService.modifyPendingOrder(ticket, terminalIndex, price);
-    _addLog('Modify pending command sent for ticket=$ticket');
   }
 
   void _handleGetChartData(Map<String, dynamic> message) {
@@ -311,8 +301,6 @@ class _HomeScreenState extends State<HomeScreen> {
   void _handleGetHistory(Map<String, dynamic> message) {
     final period = message['period'] as String? ?? 'today';
     final terminalIndex = message['terminalIndex'] as int?;
-    
-    _addLog('Getting history: period=$period, terminal=$terminalIndex');
     
     // Fire and forget
     _fetchAndSendHistory(period, terminalIndex);
@@ -349,12 +337,9 @@ class _HomeScreenState extends State<HomeScreen> {
       'period': period,
       'history': allHistory,
     });
-    
-    _addLog('Sent ${allHistory.length} history trades');
   }
 
   void _regenerateRoom() async {
-    _addLog('Regenerating room...');
     _connection?.disconnect();
     setState(() {
       _roomId = null;
@@ -367,9 +352,10 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _addLog(String message) {
-    final timestamp = DateTime.now().toString().substring(11, 19);
+    final now = DateTime.now();
+    final timestamp = '${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
     setState(() {
-      _logs.insert(0, '[$timestamp] $message');
+      _logs.insert(0, '$timestamp  $message');
       if (_logs.length > 100) _logs.removeLast();
     });
   }
@@ -448,14 +434,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
                   const SizedBox(height: 24),
 
-                  if (_roomId != null)
-                    RoomIdDisplay(
-                      roomId: _roomId!,
-                      onCopied: () => _addLog('Room ID copied to clipboard'),
-                    ),
-
-                  const SizedBox(height: 16),
-
                   TextButton.icon(
                     onPressed: _regenerateRoom,
                     icon: const Icon(
@@ -498,15 +476,15 @@ class _HomeScreenState extends State<HomeScreen> {
         children: [
           if (_mobileConnected) MobileDeviceCard(deviceName: _mobileDeviceName),
           
-          // Account cards
-          if (_accounts.isNotEmpty) ...[
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-              child: Text(
-                'MT4 TERMINALS (${_accounts.length})',
-                style: AppTextStyles.label,
-              ),
+          // MT4 Terminals section - always show
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+            child: Text(
+              'MT4 TERMINALS${_accounts.isNotEmpty ? ' (${_accounts.length})' : ''}',
+              style: AppTextStyles.label,
             ),
+          ),
+          if (_accounts.isNotEmpty)
             SizedBox(
               height: 120,
               child: ListView.builder(
@@ -518,8 +496,29 @@ class _HomeScreenState extends State<HomeScreen> {
                   return _buildAccountCard(account);
                 },
               ),
+            )
+          else
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: 16),
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.info_outline, color: AppColors.textSecondary, size: 20),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'Attach MetaSynx EA to an MT4 chart to connect',
+                      style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ],
           
           Expanded(
             child: ActivityLog(
@@ -535,9 +534,9 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildAccountCard(Map<String, dynamic> account) {
     final balance = (account['balance'] as num?)?.toDouble() ?? 0;
     final equity = (account['equity'] as num?)?.toDouble() ?? 0;
-    final freeMargin = (account['freeMargin'] as num?)?.toDouble() ?? 0;
     final accountNum = account['account'] as String? ?? 'Unknown';
     final broker = account['broker'] as String? ?? '';
+    final accountName = account['name'] as String? ?? '';
     final currency = account['currency'] as String? ?? 'USD';
     final connected = account['connected'] as bool? ?? false;
 
@@ -581,7 +580,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 2),
           Text(
             broker,
             style: const TextStyle(
@@ -590,13 +589,42 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             overflow: TextOverflow.ellipsis,
           ),
+          if (accountName.isNotEmpty) ...[
+            Text(
+              accountName,
+              style: const TextStyle(
+                color: AppColors.textSecondary,
+                fontSize: 10,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
           const Spacer(),
           _buildAccountRow('Balance', balance, currency),
           _buildAccountRow('Equity', equity, currency),
-          _buildAccountRow('Free', freeMargin, currency),
         ],
       ),
     );
+  }
+
+  String _formatNumber(double value) {
+    final parts = value.toStringAsFixed(2).split('.');
+    final intPart = parts[0];
+    final decPart = parts[1];
+    
+    // Add thousand separators
+    final buffer = StringBuffer();
+    final digits = intPart.replaceAll('-', '');
+    final isNegative = intPart.startsWith('-');
+    
+    for (int i = 0; i < digits.length; i++) {
+      if (i > 0 && (digits.length - i) % 3 == 0) {
+        buffer.write(',');
+      }
+      buffer.write(digits[i]);
+    }
+    
+    return '${isNegative ? '-' : ''}${buffer.toString()}.$decPart';
   }
 
   Widget _buildAccountRow(String label, double value, String currency) {
@@ -612,7 +640,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
         Text(
-          '${value.toStringAsFixed(2)} $currency',
+          '${_formatNumber(value)} $currency',
           style: TextStyle(
             color: label == 'Balance' 
                 ? AppColors.textPrimary 

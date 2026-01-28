@@ -2,7 +2,7 @@ import os
 import time
 
 
-msg = 'fixed app in background loading'
+msg = 'started with bridge logs cleanup 1'
 
 
 os.system('git add .')

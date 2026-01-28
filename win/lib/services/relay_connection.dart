@@ -37,10 +37,8 @@ class RelayConnection {
 
     try {
       final wsUrl = 'wss://$relayServer/ws/relay/$roomId';
-      onLog('Connecting to $wsUrl');
 
       _socket = await WebSocket.connect(wsUrl);
-      onLog('WebSocket connected');
 
       // Send join message with secret
       _socket!.add(jsonEncode({
@@ -54,7 +52,7 @@ class RelayConnection {
         _onData,
         onDone: _onDisconnected,
         onError: (error) {
-          onLog('WebSocket error: $error');
+          onLog('Connection error: $error');
           _onDisconnected();
         },
       );
@@ -72,7 +70,6 @@ class RelayConnection {
 
       switch (type) {
         case 'joined':
-          onLog('Joined room: ${message['room_id']}');
           onStatusChanged(ConnectionStatus.connected);
           break;
 
@@ -116,7 +113,6 @@ class RelayConnection {
       if (_currentRoomId != null &&
           _currentRoomSecret != null &&
           !_intentionalDisconnect) {
-        onLog('Attempting reconnect...');
         connect(_currentRoomId!, _currentRoomSecret!);
       }
     });

@@ -25,8 +25,6 @@ class EAService {
     if (!await dir.exists()) {
       await dir.create(recursive: true);
     }
-    
-    onLog?.call('EA Service initialized: $bridgePath');
   }
 
   /// Start polling for account status updates
@@ -143,7 +141,6 @@ class EAService {
       
       final json = jsonEncode(command);
       await file.writeAsString(json);
-      onLog?.call('Command sent: ${command['action']}');
       
       // Wait for command file to be deleted (EA processed it)
       for (int i = 0; i < 20; i++) {
@@ -197,14 +194,12 @@ class EAService {
   /// Close a position (full or partial)
   Future<bool> closePosition(int ticket, int terminalIndex, {double? lots}) async {
     if (lots != null) {
-      onLog?.call('Partial close: ticket=$ticket, lots=$lots');
       return await sendCommandToTerminal(terminalIndex, {
         'action': 'close_position',
         'ticket': ticket,
         'lots': lots,
       });
     } else {
-      onLog?.call('Closing position: ticket=$ticket');
       return await sendCommandToTerminal(terminalIndex, {
         'action': 'close_position',
         'ticket': ticket,
@@ -214,7 +209,6 @@ class EAService {
 
   /// Modify a position
   Future<bool> modifyPosition(int ticket, int terminalIndex, {double? sl, double? tp}) async {
-    onLog?.call('Modifying position: ticket=$ticket');
     return await sendCommandToTerminal(terminalIndex, {
       'action': 'modify_position',
       'ticket': ticket,
@@ -225,7 +219,6 @@ class EAService {
 
   /// Cancel a pending order
   Future<bool> cancelOrder(int ticket, int terminalIndex) async {
-    onLog?.call('Cancelling order: ticket=$ticket');
     return await sendCommandToTerminal(terminalIndex, {
       'action': 'cancel_order',
       'ticket': ticket,
@@ -234,7 +227,6 @@ class EAService {
 
   /// Modify pending order price
   Future<bool> modifyPendingOrder(int ticket, int terminalIndex, double price) async {
-    onLog?.call('Modifying pending order: ticket=$ticket, price=$price');
     return await sendCommandToTerminal(terminalIndex, {
       'action': 'modify_pending',
       'ticket': ticket,
