@@ -13,6 +13,7 @@ import 'account.dart';
 import 'settings/settings.dart';
 import 'chart.dart';
 import 'history.dart';
+import 'risk_calculator.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -33,6 +34,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final StreamController<Map<String, dynamic>> _chartDataController =
       StreamController<Map<String, dynamic>>.broadcast();
   final StreamController<Map<String, dynamic>> _historyDataController =
+      StreamController<Map<String, dynamic>>.broadcast();
+  final StreamController<Map<String, dynamic>> _symbolInfoController =
       StreamController<Map<String, dynamic>>.broadcast();
   Map<String, String> _accountNames = {};
   String? _mainAccountNum;
@@ -286,6 +289,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _chartDataController.add(message);
         break;
 
+      case 'symbol_info':
+        // Forward symbol info via stream
+        _symbolInfoController.add(message);
+        break;
+
       case 'history_data':
         // Forward history data via stream
         _historyDataController.add(message);
@@ -371,6 +379,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _connection.send({
       'action': 'get_history',
       'period': period,
+      'terminalIndex': terminalIndex,
+    });
+  }
+
+  void _requestSymbolInfo(String symbol, int terminalIndex) {
+    _connection.send({
+      'action': 'get_symbol_info',
+      'symbol': symbol,
       'terminalIndex': terminalIndex,
     });
   }
@@ -517,6 +533,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _positionsNotifier.dispose();
     _chartDataController.close();
     _historyDataController.close();
+    _symbolInfoController.close();
     super.dispose();
   }
 
@@ -773,7 +790,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Widget _buildHeader() {
-    final showNewOrderButton = _connectionState == relay.ConnectionState.connected &&
+    final showButtons = _connectionState == relay.ConnectionState.connected &&
         _bridgeConnected &&
         _accountsNotifier.value.isNotEmpty;
     
@@ -781,13 +798,38 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       children: [
         const Text('METASYNX', style: AppTextStyles.heading),
         const Spacer(),
-        if (showNewOrderButton)
+        if (showButtons) ...[
+          IconButton(
+            icon: const Icon(Icons.calculate_outlined, color: AppColors.primary, size: 26),
+            onPressed: _openRiskCalculator,
+            tooltip: 'Risk Calculator',
+          ),
           IconButton(
             icon: const Icon(Icons.add_circle, color: AppColors.primary, size: 28),
             onPressed: _openNewOrder,
             tooltip: 'New Order',
           ),
+        ],
       ],
+    );
+  }
+
+  void _openRiskCalculator() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => RiskCalculatorScreen(
+          accounts: _accountsNotifier.value,
+          accountNames: _accountNames,
+          mainAccountNum: _mainAccountNum,
+          lotRatios: _lotRatios,
+          symbolSuffixes: _symbolSuffixes,
+          preferredPairs: _preferredPairs,
+          onPlaceOrder: _placeOrder,
+          onRequestSymbolInfo: _requestSymbolInfo,
+          symbolInfoStream: _symbolInfoController.stream,
+        ),
+      ),
     );
   }
 

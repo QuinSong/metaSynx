@@ -1,939 +1,1140 @@
-//+------------------------------------------------------------------+
-//|                                                  MetaSynxEA.mq4  |
-//|                                          MetaSynx Bridge Client  |
-//|                                                                  |
-//+------------------------------------------------------------------+
-#property copyright "MetaSynx"
-#property link      ""
-#property version   "2.10"
-#property strict
+import 'package:flutter/material.dart';
+import 'dart:async';
+import 'dart:convert';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../core/theme.dart';
+import '../services/relay_connection.dart' as relay;
+import '../components/connection_card.dart';
+import '../components/scan_button.dart';
+import '../utils/formatters.dart';
+import 'qr_scanner.dart';
+import 'new_order.dart';
+import 'account.dart';
+import 'settings/settings.dart';
+import 'chart.dart';
+import 'history.dart';
+import 'risk_calculator.dart';
 
-//+------------------------------------------------------------------+
-//| Configuration                                                     |
-//+------------------------------------------------------------------+
-input string   BridgeFolder = "MetaSynx";  // Folder for bridge communication
-input int      UpdateIntervalMs = 500;      // Update interval in milliseconds
+class HomeScreen extends StatefulWidget {
+  const HomeScreen({super.key});
 
-//+------------------------------------------------------------------+
-//| Global Variables                                                  |
-//+------------------------------------------------------------------+
-string g_dataPath;
-string g_commandFile;
-string g_responseFile;
-string g_statusFile;
-string g_positionsFile;
-string g_chartFile;
-int    g_terminalIndex = -1;
-string g_lastCommandHash = "";
-
-// Chart subscription state
-bool   g_chartSubscribed = false;
-string g_chartSymbol = "";
-int    g_chartTimeframe = PERIOD_M15;
-int    g_chartDelayCount = 0;  // Delay counter to let history be read
-
-//+------------------------------------------------------------------+
-//| Expert initialization function                                    |
-//+------------------------------------------------------------------+
-int OnInit()
-{
-   g_dataPath = TerminalInfoString(TERMINAL_COMMONDATA_PATH) + "\\Files\\" + BridgeFolder + "\\";
-   
-   if(!FolderCreate(BridgeFolder, FILE_COMMON)) { }
-   
-   g_terminalIndex = GetTerminalIndex();
-   
-   g_statusFile = BridgeFolder + "\\status_" + IntegerToString(g_terminalIndex) + ".json";
-   g_commandFile = BridgeFolder + "\\command_" + IntegerToString(g_terminalIndex) + ".json";
-   g_responseFile = BridgeFolder + "\\response_" + IntegerToString(g_terminalIndex) + ".json";
-   g_positionsFile = BridgeFolder + "\\positions_" + IntegerToString(g_terminalIndex) + ".json";
-   g_chartFile = BridgeFolder + "\\chart_" + IntegerToString(g_terminalIndex) + ".json";
-   
-   Print("MetaSynx EA v2.10 initialized - Terminal Index: ", g_terminalIndex, " Account: ", AccountNumber());
-   
-   WriteAccountStatus();
-   WritePositions();
-   
-   EventSetMillisecondTimer(UpdateIntervalMs);
-   
-   return(INIT_SUCCEEDED);
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
 }
 
-//+------------------------------------------------------------------+
-//| Expert deinitialization function                                  |
-//+------------------------------------------------------------------+
-void OnDeinit(const int reason)
-{
-   EventKillTimer();
-   if(FileIsExist(g_statusFile, FILE_COMMON)) FileDelete(g_statusFile, FILE_COMMON);
-   if(FileIsExist(g_positionsFile, FILE_COMMON)) FileDelete(g_positionsFile, FILE_COMMON);
-   if(FileIsExist(g_chartFile, FILE_COMMON)) FileDelete(g_chartFile, FILE_COMMON);
-   Print("MetaSynx EA deinitialized");
-}
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
+  final relay.RelayConnection _connection = relay.RelayConnection();
+  relay.ConnectionState _connectionState = relay.ConnectionState.disconnected;
+  bool _bridgeConnected = false;
+  String? _roomId;
+  final ValueNotifier<List<Map<String, dynamic>>> _accountsNotifier =
+      ValueNotifier<List<Map<String, dynamic>>>([]);
+  final ValueNotifier<List<Map<String, dynamic>>> _positionsNotifier =
+      ValueNotifier<List<Map<String, dynamic>>>([]);
+  final StreamController<Map<String, dynamic>> _chartDataController =
+      StreamController<Map<String, dynamic>>.broadcast();
+  final StreamController<Map<String, dynamic>> _historyDataController =
+      StreamController<Map<String, dynamic>>.broadcast();
+  final StreamController<Map<String, dynamic>> _symbolInfoController =
+      StreamController<Map<String, dynamic>>.broadcast();
+  Map<String, String> _accountNames = {};
+  String? _mainAccountNum;
+  Map<String, double> _lotRatios = {};
+  Map<String, String> _symbolSuffixes = {};
+  Set<String> _preferredPairs = {};
+  bool _includeCommissionSwap = false;
+  bool _showPLPercent = false;
+  bool _confirmBeforeClose = true;
+  Timer? _refreshTimer;
+  bool _isAppInForeground = true;
+  int _selectedNavIndex = 0;
 
-//+------------------------------------------------------------------+
-//| Timer function                                                    |
-//+------------------------------------------------------------------+
-void OnTimer()
-{
-   CheckAndProcessCommands();
-   WriteAccountStatus();
-   WritePositions();
-   
-   // If chart is subscribed, update the current candle
-   if(g_chartSubscribed)
-   {
-      // Wait for delay to expire before sending updates
-      // This gives the bridge time to read the history first
-      if(g_chartDelayCount > 0)
-      {
-         g_chartDelayCount--;
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _loadSettings();
+    _setupConnection();
+    _tryAutoConnect();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    
+    switch (state) {
+      case AppLifecycleState.resumed:
+        // App came to foreground - resume polling
+        _isAppInForeground = true;
+        if (_bridgeConnected) {
+          _startRefreshTimer();
+        }
+        break;
+      case AppLifecycleState.paused:
+      case AppLifecycleState.inactive:
+      case AppLifecycleState.hidden:
+      case AppLifecycleState.detached:
+        // App went to background - stop polling
+        _isAppInForeground = false;
+        _stopRefreshTimer();
+        break;
+    }
+  }
+
+  Future<void> _loadSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    
+    // Load account names
+    final namesJson = prefs.getString('account_names');
+    if (namesJson != null) {
+      _accountNames = Map<String, String>.from(jsonDecode(namesJson));
+    }
+    
+    // Load main account
+    final mainAccount = prefs.getString('main_account');
+    if (mainAccount != null && mainAccount.isNotEmpty) {
+      _mainAccountNum = mainAccount;
+    }
+    
+    // Load lot ratios
+    final ratiosJson = prefs.getString('lot_ratios');
+    if (ratiosJson != null) {
+      final decoded = jsonDecode(ratiosJson) as Map<String, dynamic>;
+      _lotRatios = decoded.map((k, v) => MapEntry(k, (v as num).toDouble()));
+    }
+    
+    // Load symbol suffixes
+    final suffixesJson = prefs.getString('symbol_suffixes');
+    if (suffixesJson != null) {
+      _symbolSuffixes = Map<String, String>.from(jsonDecode(suffixesJson));
+    }
+    
+    // Load preferred pairs
+    final pairsJson = prefs.getString('preferred_pairs');
+    if (pairsJson != null) {
+      final List<dynamic> decoded = jsonDecode(pairsJson);
+      _preferredPairs = decoded.map((e) => e.toString()).toSet();
+    }
+    
+    // Load include commission/swap setting
+    _includeCommissionSwap = prefs.getBool('include_commission_swap') ?? false;
+    
+    // Load show P/L % setting
+    _showPLPercent = prefs.getBool('show_pl_percent') ?? false;
+    
+    // Load confirm before close setting (default true)
+    _confirmBeforeClose = prefs.getBool('confirm_before_close') ?? true;
+    
+    setState(() {});
+  }
+
+  Future<void> _saveSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('account_names', jsonEncode(_accountNames));
+    await prefs.setString('main_account', _mainAccountNum ?? '');
+    await prefs.setString('lot_ratios', jsonEncode(_lotRatios));
+    await prefs.setString('symbol_suffixes', jsonEncode(_symbolSuffixes));
+    await prefs.setString('preferred_pairs', jsonEncode(_preferredPairs.toList()));
+    await prefs.setBool('include_commission_swap', _includeCommissionSwap);
+    await prefs.setBool('show_pl_percent', _showPLPercent);
+    await prefs.setBool('confirm_before_close', _confirmBeforeClose);
+  }
+
+  Future<void> _updateConfirmBeforeClose(bool value) async {
+    setState(() => _confirmBeforeClose = value);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('confirm_before_close', value);
+  }
+
+  String getAccountDisplayName(Map<String, dynamic> account) {
+    final accountNum = account['account'] as String? ?? '';
+    final customName = _accountNames[accountNum];
+    if (customName != null && customName.isNotEmpty) {
+      return customName;
+    }
+    return accountNum;
+  }
+
+  double _getLotRatio(String accountNum) {
+    if (_mainAccountNum == null) return 1.0;
+    if (accountNum == _mainAccountNum) return 1.0;
+    return _lotRatios[accountNum] ?? 1.0;
+  }
+
+  String _getSymbolWithSuffix(String symbol, String accountNum) {
+    final suffix = _symbolSuffixes[accountNum] ?? '';
+    return '$symbol$suffix';
+  }
+
+  void _setupConnection() {
+    _connection.onStateChanged = (state) {
+      setState(() => _connectionState = state);
+      if (state == relay.ConnectionState.connected) {
+        _startAccountsRefresh();
+      } else {
+        _stopAccountsRefresh();
       }
-      else
-      {
-         WriteChartUpdate();
+    };
+    _connection.onPairingStatusChanged = (bridgeConnected) {
+      setState(() => _bridgeConnected = bridgeConnected);
+      if (bridgeConnected) {
+        _requestAccounts();
       }
-   }
-}
+    };
+    _connection.onMessage = _handleMessage;
+  }
 
-//+------------------------------------------------------------------+
-//| Get unique terminal index                                         |
-//+------------------------------------------------------------------+
-int GetTerminalIndex()
-{
-   long accountNum = AccountNumber();
-   string indexFile = BridgeFolder + "\\terminal_index.json";
-   
-   int handle = FileOpen(indexFile, FILE_READ|FILE_TXT|FILE_COMMON);
-   if(handle != INVALID_HANDLE)
-   {
-      string content = "";
-      while(!FileIsEnding(handle)) content += FileReadString(handle);
-      FileClose(handle);
+  void _startAccountsRefresh() {
+    // Don't start if app is in background
+    if (!_isAppInForeground) return;
+    
+    _refreshTimer?.cancel();
+    _refreshTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (_bridgeConnected && _isAppInForeground) {
+        _requestAccounts();
+        _requestAllPositions();
+      }
+    });
+  }
+  
+  void _startRefreshTimer() {
+    _startAccountsRefresh();
+  }
+
+  void _stopAccountsRefresh() {
+    _refreshTimer?.cancel();
+    _refreshTimer = null;
+  }
+  
+  void _stopRefreshTimer() {
+    _stopAccountsRefresh();
+  }
+
+  Future<void> _tryAutoConnect() async {
+    final prefs = await SharedPreferences.getInstance();
+    final lastConnection = prefs.getString('last_connection');
+    if (lastConnection != null) {
+      try {
+        final config = jsonDecode(lastConnection) as Map<String, dynamic>;
+        setState(() {
+          _roomId = config['room'];
+        });
+        await _connection.connect(config);
+      } catch (e) {
+        debugPrint('Auto-connect failed: $e');
+      }
+    }
+  }
+
+  void _openScanner() async {
+    final result = await Navigator.push<Map<String, dynamic>>(
+      context,
+      MaterialPageRoute(builder: (context) => const QRScannerScreen()),
+    );
+
+    if (result != null) {
+      setState(() {
+        _connectionState = relay.ConnectionState.connecting;
+        _roomId = result['room'];
+      });
+
+      try {
+        await _connection.connect(result);
+
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('last_connection', jsonEncode(result));
+      } catch (e) {
+        _showError('Connection failed: $e');
+        setState(() => _connectionState = relay.ConnectionState.disconnected);
+      }
+    }
+  }
+
+  void _handleMessage(Map<String, dynamic> message) {
+    final action = message['action'] as String?;
+
+    switch (action) {
+      case 'accounts_list':
+        final accounts = message['accounts'] as List?;
+        if (accounts != null) {
+          _accountsNotifier.value = List<Map<String, dynamic>>.from(accounts);
+          // Trigger setState to update account count in UI
+          setState(() {});
+        }
+        break;
+
+      case 'positions_list':
+        final positions = message['positions'] as List?;
+        final targetIndex = message['targetIndex'] as int?;
+        if (positions != null) {
+          if (targetIndex != null) {
+            // Merge: replace positions for this terminal only, keep others
+            final currentPositions = List<Map<String, dynamic>>.from(_positionsNotifier.value);
+            currentPositions.removeWhere((p) => p['terminalIndex'] == targetIndex);
+            currentPositions.addAll(List<Map<String, dynamic>>.from(positions));
+            _positionsNotifier.value = currentPositions;
+          } else {
+            // Full replacement when getting all positions
+            _positionsNotifier.value = List<Map<String, dynamic>>.from(positions);
+          }
+        }
+        break;
+
+      case 'order_result':
+        _handleOrderResult(message);
+        break;
+
+      case 'chart_data':
+        // Forward chart data via stream
+        _chartDataController.add(message);
+        break;
+
+      case 'symbol_info':
+        // Forward symbol info via stream
+        _symbolInfoController.add(message);
+        break;
+
+      case 'history_data':
+        // Forward history data via stream
+        _historyDataController.add(message);
+        break;
+
+      case 'pong':
+        break;
+    }
+  }
+
+  void _handleOrderResult(Map<String, dynamic> message) {
+    final success = message['success'] as bool? ?? false;
+    final accountNum = message['account'] as String? ?? '';
+    final errorMsg = message['error'] as String?;
+
+    if (success) {
+      _showSuccess('Order placed on $accountNum');
+    } else {
+      _showError('Order failed on $accountNum: ${errorMsg ?? "Unknown error"}');
+    }
+  }
+
+  void _requestAccounts() {
+    _connection.send({'action': 'get_accounts'});
+  }
+
+  void _requestAllPositions() {
+    _connection.send({
+      'action': 'get_positions',
+    });
+  }
+
+  void _closePosition(int ticket, int terminalIndex, [double? lots]) {
+    final data = <String, dynamic>{
+      'action': 'close_position',
+      'ticket': ticket,
+      'terminalIndex': terminalIndex,
+    };
+    if (lots != null) {
+      data['lots'] = lots;
+    }
+    _connection.send(data);
+  }
+
+  void _modifyPosition(int ticket, int terminalIndex, double? sl, double? tp) {
+    // -1 = keep existing, 0 = remove, >0 = set new value
+    _connection.send({
+      'action': 'modify_position',
+      'ticket': ticket,
+      'terminalIndex': terminalIndex,
+      'sl': sl ?? -1,
+      'tp': tp ?? -1,
+    });
+  }
+
+  void _cancelOrder(int ticket, int terminalIndex) {
+    _connection.send({
+      'action': 'cancel_order',
+      'ticket': ticket,
+      'terminalIndex': terminalIndex,
+    });
+  }
+
+  void _modifyPendingOrder(int ticket, int terminalIndex, double price) {
+    _connection.send({
+      'action': 'modify_pending',
+      'ticket': ticket,
+      'terminalIndex': terminalIndex,
+      'price': price,
+    });
+  }
+
+  void _requestChartData(String symbol, String timeframe, int terminalIndex) {
+    _connection.send({
+      'action': 'get_chart_data',
+      'symbol': symbol,
+      'timeframe': timeframe,
+      'terminalIndex': terminalIndex,
+    });
+  }
+
+  void _requestHistory(String period, int? terminalIndex) {
+    _connection.send({
+      'action': 'get_history',
+      'period': period,
+      'terminalIndex': terminalIndex,
+    });
+  }
+
+  void _requestSymbolInfo(String symbol, int terminalIndex) {
+    _connection.send({
+      'action': 'get_symbol_info',
+      'symbol': symbol,
+      'terminalIndex': terminalIndex,
+    });
+  }
+
+  void _openAccountDetail(Map<String, dynamic> account) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => AccountDetailScreen(
+          initialAccount: account,
+          accountsNotifier: _accountsNotifier,
+          positionsNotifier: _positionsNotifier,
+          onClosePosition: _closePosition,
+          onModifyPosition: _modifyPosition,
+          onCancelOrder: _cancelOrder,
+          onModifyPendingOrder: _modifyPendingOrder,
+          accountNames: _accountNames,
+          mainAccountNum: _mainAccountNum,
+          includeCommissionSwap: _includeCommissionSwap,
+          showPLPercent: _showPLPercent,
+          confirmBeforeClose: _confirmBeforeClose,
+          onConfirmBeforeCloseChanged: _updateConfirmBeforeClose,
+          symbolSuffixes: _symbolSuffixes,
+          lotRatios: _lotRatios,
+          preferredPairs: _preferredPairs,
+          onPlaceOrder: _placeOrder,
+          chartDataStream: _chartDataController.stream,
+          onRequestChartData: _requestChartData,
+          bottomNavBar: _buildExternalNavBar(1), // Chart highlighted
+        ),
+      ),
+    );
+  }
+
+  void _openNewOrder() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => NewOrderScreen(
+          accounts: _accountsNotifier.value,
+          accountNames: _accountNames,
+          mainAccountNum: _mainAccountNum,
+          lotRatios: _lotRatios,
+          preferredPairs: _preferredPairs,
+          symbolSuffixes: _symbolSuffixes,
+          onPlaceOrder: _placeOrder,
+        ),
+      ),
+    );
+  }
+
+  void _placeOrder({
+    required String symbol,
+    required String type,
+    required double lots,
+    required double? tp,
+    required double? sl,
+    required double? price,
+    required List<int> accountIndices,
+    required bool useRatios,
+    required bool applySuffix,
+  }) {
+    // Generate unique magic number for this order batch
+    // Using timestamp to ensure uniqueness across orders
+    final magic = DateTime.now().millisecondsSinceEpoch % 2147483647;
+    
+    for (final index in accountIndices) {
+      double adjustedLots = lots;
       
-      string searchStr = "\"" + IntegerToString(accountNum) + "\":";
-      int pos = StringFind(content, searchStr);
-      if(pos >= 0)
-      {
-         int indexStart = pos + StringLen(searchStr);
-         int indexEnd = StringFind(content, ",", indexStart);
-         if(indexEnd < 0) indexEnd = StringFind(content, "}", indexStart);
-         if(indexEnd > indexStart)
-            return (int)StringToInteger(StringSubstr(content, indexStart, indexEnd - indexStart));
-      }
-   }
-   
-   for(int i = 0; i < 10; i++)
-   {
-      if(!FileIsExist(BridgeFolder + "\\status_" + IntegerToString(i) + ".json", FILE_COMMON))
-      {
-         SaveTerminalIndex(accountNum, i);
-         return i;
-      }
-   }
-   return 0;
-}
-
-//+------------------------------------------------------------------+
-//| Save terminal index mapping                                       |
-//+------------------------------------------------------------------+
-void SaveTerminalIndex(long accountNum, int index)
-{
-   string indexFile = BridgeFolder + "\\terminal_index.json";
-   string content = "";
-   
-   int handle = FileOpen(indexFile, FILE_READ|FILE_TXT|FILE_COMMON);
-   if(handle != INVALID_HANDLE)
-   {
-      while(!FileIsEnding(handle)) content += FileReadString(handle);
-      FileClose(handle);
-   }
-   
-   if(StringLen(content) < 2)
-      content = "{\"" + IntegerToString(accountNum) + "\":" + IntegerToString(index) + "}";
-   else
-   {
-      int closePos = StringFind(content, "}");
-      if(closePos > 0)
-         content = StringSubstr(content, 0, closePos) + ",\"" + IntegerToString(accountNum) + "\":" + IntegerToString(index) + "}";
-   }
-   
-   handle = FileOpen(indexFile, FILE_WRITE|FILE_TXT|FILE_COMMON);
-   if(handle != INVALID_HANDLE)
-   {
-      FileWriteString(handle, content);
-      FileClose(handle);
-   }
-}
-
-//+------------------------------------------------------------------+
-//| Write account status                                              |
-//+------------------------------------------------------------------+
-void WriteAccountStatus()
-{
-   string json = "{";
-   json += "\"index\":" + IntegerToString(g_terminalIndex) + ",";
-   json += "\"account\":\"" + IntegerToString(AccountNumber()) + "\",";
-   json += "\"name\":\"" + AccountName() + "\",";
-   json += "\"broker\":\"" + AccountCompany() + "\",";
-   json += "\"server\":\"" + AccountServer() + "\",";
-   json += "\"currency\":\"" + AccountCurrency() + "\",";
-   json += "\"balance\":" + DoubleToString(AccountBalance(), 2) + ",";
-   json += "\"equity\":" + DoubleToString(AccountEquity(), 2) + ",";
-   json += "\"margin\":" + DoubleToString(AccountMargin(), 2) + ",";
-   json += "\"freeMargin\":" + DoubleToString(AccountFreeMargin(), 2) + ",";
-   json += "\"marginLevel\":" + DoubleToString(AccountInfoDouble(ACCOUNT_MARGIN_LEVEL), 2) + ",";
-   json += "\"leverage\":" + IntegerToString(AccountLeverage()) + ",";
-   json += "\"openPositions\":" + IntegerToString(OrdersTotal()) + ",";
-   json += "\"profit\":" + DoubleToString(AccountProfit(), 2) + ",";
-   json += "\"lastUpdate\":\"" + TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS) + "\",";
-   json += "\"connected\":" + (IsConnected() ? "true" : "false") + ",";
-   json += "\"tradeAllowed\":" + (IsTradeAllowed() ? "true" : "false");
-   json += "}";
-   
-   int handle = FileOpen(g_statusFile, FILE_WRITE|FILE_TXT|FILE_COMMON);
-   if(handle != INVALID_HANDLE)
-   {
-      FileWriteString(handle, json);
-      FileClose(handle);
-   }
-}
-
-//+------------------------------------------------------------------+
-//| Write positions                                                   |
-//+------------------------------------------------------------------+
-void WritePositions()
-{
-   string json = "{\"index\":" + IntegerToString(g_terminalIndex) + ",\"positions\":[";
-   
-   bool first = true;
-   for(int i = 0; i < OrdersTotal(); i++)
-   {
-      if(OrderSelect(i, SELECT_BY_POS, MODE_TRADES))
-      {
-         if(!first) json += ",";
-         first = false;
-         
-         int orderType = OrderType();
-         bool isPending = (orderType >= OP_BUYLIMIT);
-         
-         double currentPrice = 0;
-         if(!isPending)
-         {
-            // Market orders: bid for buy (close price), ask for sell
-            currentPrice = orderType == OP_BUY ? 
-               MarketInfo(OrderSymbol(), MODE_BID) : MarketInfo(OrderSymbol(), MODE_ASK);
-         }
-         else
-         {
-            // Pending orders: get current market price for reference
-            // Buy limit/stop would execute at ask, sell limit/stop at bid
-            if(orderType == OP_BUYLIMIT || orderType == OP_BUYSTOP)
-               currentPrice = MarketInfo(OrderSymbol(), MODE_ASK);
-            else
-               currentPrice = MarketInfo(OrderSymbol(), MODE_BID);
-         }
-         
-         json += "{";
-         json += "\"ticket\":" + IntegerToString(OrderTicket()) + ",";
-         json += "\"symbol\":\"" + OrderSymbol() + "\",";
-         json += "\"type\":\"" + GetOrderTypeString(orderType) + "\",";
-         json += "\"lots\":" + DoubleToString(OrderLots(), 2) + ",";
-         json += "\"openPrice\":" + DoubleToString(OrderOpenPrice(), 5) + ",";
-         json += "\"currentPrice\":" + DoubleToString(currentPrice, 5) + ",";
-         json += "\"sl\":" + DoubleToString(OrderStopLoss(), 5) + ",";
-         json += "\"tp\":" + DoubleToString(OrderTakeProfit(), 5) + ",";
-         json += "\"profit\":" + DoubleToString(isPending ? 0 : OrderProfit(), 2) + ",";
-         json += "\"swap\":" + DoubleToString(isPending ? 0 : OrderSwap(), 2) + ",";
-         json += "\"commission\":" + DoubleToString(isPending ? 0 : OrderCommission(), 2) + ",";
-         json += "\"openTime\":\"" + TimeToString(OrderOpenTime(), TIME_DATE|TIME_SECONDS) + "\",";
-         json += "\"comment\":\"" + OrderComment() + "\",";
-         json += "\"magic\":" + IntegerToString(OrderMagicNumber()) + ",";
-         json += "\"isPending\":" + (isPending ? "true" : "false");
-         json += "}";
-      }
-   }
-   
-   json += "]}";
-   
-   int handle = FileOpen(g_positionsFile, FILE_WRITE|FILE_TXT|FILE_COMMON);
-   if(handle != INVALID_HANDLE)
-   {
-      FileWriteString(handle, json);
-      FileClose(handle);
-   }
-}
-
-//+------------------------------------------------------------------+
-//| Write chart data (historical + current)                           |
-//+------------------------------------------------------------------+
-void WriteChartData(string symbol, int timeframe, int count)
-{
-   int digits = (int)MarketInfo(symbol, MODE_DIGITS);
-   double bid = MarketInfo(symbol, MODE_BID);
-   double ask = MarketInfo(symbol, MODE_ASK);
-   
-   string json = "{";
-   json += "\"type\":\"history\",";
-   json += "\"symbol\":\"" + symbol + "\",";
-   json += "\"timeframe\":" + IntegerToString(timeframe) + ",";
-   json += "\"bid\":" + DoubleToString(bid, digits) + ",";
-   json += "\"ask\":" + DoubleToString(ask, digits) + ",";
-   json += "\"candles\":[";
-   
-   int available = iBars(symbol, timeframe);
-   int barsToGet = MathMin(count, available);
-   
-   bool first = true;
-   for(int i = barsToGet - 1; i >= 0; i--)
-   {
-      if(!first) json += ",";
-      first = false;
-      
-      datetime barTime = iTime(symbol, timeframe, i);
-      double open = iOpen(symbol, timeframe, i);
-      double high = iHigh(symbol, timeframe, i);
-      double low = iLow(symbol, timeframe, i);
-      double close = iClose(symbol, timeframe, i);
-      
-      json += "{";
-      json += "\"time\":" + IntegerToString((long)barTime) + ",";
-      json += "\"open\":" + DoubleToString(open, digits) + ",";
-      json += "\"high\":" + DoubleToString(high, digits) + ",";
-      json += "\"low\":" + DoubleToString(low, digits) + ",";
-      json += "\"close\":" + DoubleToString(close, digits);
-      json += "}";
-   }
-   
-   json += "]}";
-   
-   int handle = FileOpen(g_chartFile, FILE_WRITE|FILE_TXT|FILE_COMMON);
-   if(handle != INVALID_HANDLE)
-   {
-      FileWriteString(handle, json);
-      FileClose(handle);
-   }
-   
-   Print("Chart data written: ", symbol, " TF:", timeframe, " bars:", barsToGet);
-}
-
-//+------------------------------------------------------------------+
-//| Write chart update (current candle only)                          |
-//+------------------------------------------------------------------+
-void WriteChartUpdate()
-{
-   if(!g_chartSubscribed || g_chartSymbol == "") return;
-   
-   int digits = (int)MarketInfo(g_chartSymbol, MODE_DIGITS);
-   
-   datetime barTime = iTime(g_chartSymbol, g_chartTimeframe, 0);
-   double open = iOpen(g_chartSymbol, g_chartTimeframe, 0);
-   double high = iHigh(g_chartSymbol, g_chartTimeframe, 0);
-   double low = iLow(g_chartSymbol, g_chartTimeframe, 0);
-   double close = iClose(g_chartSymbol, g_chartTimeframe, 0);
-   
-   string json = "{";
-   json += "\"type\":\"update\",";
-   json += "\"symbol\":\"" + g_chartSymbol + "\",";
-   json += "\"timeframe\":" + IntegerToString(g_chartTimeframe) + ",";
-   json += "\"candle\":{";
-   json += "\"time\":" + IntegerToString((long)barTime) + ",";
-   json += "\"open\":" + DoubleToString(open, digits) + ",";
-   json += "\"high\":" + DoubleToString(high, digits) + ",";
-   json += "\"low\":" + DoubleToString(low, digits) + ",";
-   json += "\"close\":" + DoubleToString(close, digits);
-   json += "}}";
-   
-   int handle = FileOpen(g_chartFile, FILE_WRITE|FILE_TXT|FILE_COMMON);
-   if(handle != INVALID_HANDLE)
-   {
-      FileWriteString(handle, json);
-      FileClose(handle);
-   }
-}
-
-//+------------------------------------------------------------------+
-//| Convert timeframe string to MT4 period                            |
-//+------------------------------------------------------------------+
-int StringToTimeframe(string tf)
-{
-   if(tf == "M1" || tf == "1") return PERIOD_M1;
-   if(tf == "M5" || tf == "5") return PERIOD_M5;
-   if(tf == "M15" || tf == "15") return PERIOD_M15;
-   if(tf == "M30" || tf == "30") return PERIOD_M30;
-   if(tf == "H1" || tf == "60") return PERIOD_H1;
-   if(tf == "H4" || tf == "240") return PERIOD_H4;
-   if(tf == "D1" || tf == "D") return PERIOD_D1;
-   if(tf == "W1" || tf == "W") return PERIOD_W1;
-   if(tf == "MN1" || tf == "MN") return PERIOD_MN1;
-   return PERIOD_M15;
-}
-
-//+------------------------------------------------------------------+
-//| Check and process commands                                        |
-//+------------------------------------------------------------------+
-void CheckAndProcessCommands()
-{
-   if(!FileIsExist(g_commandFile, FILE_COMMON)) return;
-   
-   int handle = FileOpen(g_commandFile, FILE_READ|FILE_TXT|FILE_COMMON);
-   if(handle == INVALID_HANDLE) return;
-   
-   string content = "";
-   while(!FileIsEnding(handle)) content += FileReadString(handle);
-   FileClose(handle);
-   
-   if(StringLen(content) < 5)
-   {
-      FileDelete(g_commandFile, FILE_COMMON);
-      return;
-   }
-   
-   // Use content hash to avoid duplicate processing
-   if(content == g_lastCommandHash) return;
-   g_lastCommandHash = content;
-   
-   Print("Processing command: ", content);
-   ProcessCommand(content);
-   
-   FileDelete(g_commandFile, FILE_COMMON);
-}
-
-//+------------------------------------------------------------------+
-//| Process command                                                   |
-//+------------------------------------------------------------------+
-void ProcessCommand(string jsonCommand)
-{
-   string action = ExtractJsonString(jsonCommand, "action");
-   if(action == "") return;
-   
-   if(action == "place_order")
-   {
-      PlaceOrder(
-         ExtractJsonString(jsonCommand, "symbol"),
-         ExtractJsonString(jsonCommand, "type"),
-         StringToDouble(ExtractJsonString(jsonCommand, "lots")),
-         StringToDouble(ExtractJsonString(jsonCommand, "sl")),
-         StringToDouble(ExtractJsonString(jsonCommand, "tp")),
-         StringToDouble(ExtractJsonString(jsonCommand, "price")),
-         (int)StringToInteger(ExtractJsonString(jsonCommand, "magic"))
-      );
-   }
-   else if(action == "close_position")
-   {
-      int ticket = (int)StringToInteger(ExtractJsonString(jsonCommand, "ticket"));
-      string lotsStr = ExtractJsonString(jsonCommand, "lots");
-      double lots = 0;
-      if(StringLen(lotsStr) > 0 && lotsStr != "null")
-      {
-         lots = StringToDouble(lotsStr);
+      if (useRatios) {
+        // Find account number for this index to get lot ratio
+        final account = _accountsNotifier.value.firstWhere(
+          (a) => a['index'] == index,
+          orElse: () => <String, dynamic>{},
+        );
+        final accountNum = account['account'] as String? ?? '';
+        final ratio = _getLotRatio(accountNum);
+        adjustedLots = double.parse((lots * ratio).toStringAsFixed(2));
       }
       
-      if(lots > 0)
-      {
-         Print("PARTIAL CLOSE COMMAND: ticket=", ticket, " lots=", lots);
-         ClosePosition(ticket, lots);
+      // Get account for symbol suffix (only if applySuffix is true)
+      String finalSymbol = symbol;
+      if (applySuffix) {
+        final account = _accountsNotifier.value.firstWhere(
+          (a) => a['index'] == index,
+          orElse: () => <String, dynamic>{},
+        );
+        final accountNum = account['account'] as String? ?? '';
+        finalSymbol = _getSymbolWithSuffix(symbol, accountNum);
       }
-      else
-      {
-         Print("CLOSE COMMAND: ticket=", ticket);
-         ClosePosition(ticket, 0); // 0 means close all
+      
+      _connection.send({
+        'action': 'place_order',
+        'symbol': finalSymbol,
+        'type': type,
+        'lots': adjustedLots,
+        'tp': tp ?? 0,
+        'sl': sl ?? 0,
+        'price': price ?? 0,
+        'targetIndex': index,
+        'magic': magic,
+      });
+    }
+  }
+
+  void _disconnect() async {
+    _connection.disconnect();
+    _stopAccountsRefresh();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('last_connection');
+    setState(() {
+      _connectionState = relay.ConnectionState.disconnected;
+      _bridgeConnected = false;
+      _roomId = null;
+      _accountsNotifier.value = [];
+      _positionsNotifier.value = [];
+    });
+  }
+
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red.shade700,
+      ),
+    );
+  }
+
+  void _showSuccess(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: AppColors.primary,
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _connection.disconnect();
+    _stopAccountsRefresh();
+    _accountsNotifier.dispose();
+    _positionsNotifier.dispose();
+    _chartDataController.close();
+    _historyDataController.close();
+    _symbolInfoController.close();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isConnected = _connectionState == relay.ConnectionState.connected &&
+        _bridgeConnected &&
+        _accountsNotifier.value.isNotEmpty;
+
+    return Scaffold(
+      body: SafeArea(
+        child: isConnected ? _buildCurrentScreen() : _buildHomeContent(),
+      ),
+      bottomNavigationBar: _buildBottomNavBar(),
+    );
+  }
+
+  Widget _buildCurrentScreen() {
+    switch (_selectedNavIndex) {
+      case 0:
+        return _buildHomeContent();
+      case 1:
+        return ChartScreen(
+          positions: _positionsNotifier.value,
+          positionsNotifier: _positionsNotifier,
+          accounts: _accountsNotifier.value,
+          onClosePosition: _closePosition,
+          onModifyPosition: _modifyPosition,
+          onCancelOrder: _cancelOrder,
+          onModifyPendingOrder: _modifyPendingOrder,
+          accountNames: _accountNames,
+          mainAccountNum: _mainAccountNum,
+          includeCommissionSwap: _includeCommissionSwap,
+          showPLPercent: _showPLPercent,
+          confirmBeforeClose: _confirmBeforeClose,
+          onConfirmBeforeCloseChanged: _updateConfirmBeforeClose,
+          chartDataStream: _chartDataController.stream,
+          onRequestChartData: _requestChartData,
+          symbolSuffixes: _symbolSuffixes,
+          lotRatios: _lotRatios,
+          preferredPairs: _preferredPairs,
+          onPlaceOrder: _placeOrder,
+        );
+      case 2:
+        return HistoryScreen(
+          accountNames: _accountNames,
+          historyDataStream: _historyDataController.stream,
+          onRequestHistory: _requestHistory,
+          includeCommissionSwap: _includeCommissionSwap,
+        );
+      case 3:
+        return SettingsScreen(
+          accounts: _accountsNotifier.value,
+          accountNames: _accountNames,
+          mainAccountNum: _mainAccountNum,
+          lotRatios: _lotRatios,
+          symbolSuffixes: _symbolSuffixes,
+          preferredPairs: _preferredPairs,
+          includeCommissionSwap: _includeCommissionSwap,
+          showPLPercent: _showPLPercent,
+          confirmBeforeClose: _confirmBeforeClose,
+          onNamesUpdated: (names) {
+            setState(() {
+              _accountNames = names;
+            });
+            _saveSettings();
+          },
+          onMainAccountUpdated: (accountNum) {
+            setState(() {
+              _mainAccountNum = accountNum;
+            });
+            _saveSettings();
+          },
+          onLotRatiosUpdated: (ratios) {
+            setState(() {
+              _lotRatios = ratios;
+            });
+            _saveSettings();
+          },
+          onSymbolSuffixesUpdated: (suffixes) {
+            setState(() {
+              _symbolSuffixes = suffixes;
+            });
+            _saveSettings();
+          },
+          onPreferredPairsUpdated: (pairs) {
+            setState(() {
+              _preferredPairs = pairs;
+            });
+          },
+          onIncludeCommissionSwapUpdated: (value) {
+            setState(() {
+              _includeCommissionSwap = value;
+            });
+          },
+          onShowPLPercentUpdated: (value) {
+            setState(() {
+              _showPLPercent = value;
+            });
+          },
+          onConfirmBeforeCloseUpdated: (value) {
+            setState(() {
+              _confirmBeforeClose = value;
+            });
+          },
+        );
+      default:
+        return _buildHomeContent();
+    }
+  }
+
+  Widget _buildHomeContent() {
+    return Padding(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildHeader(),
+          const SizedBox(height: 10),
+          ConnectionCard(
+            connectionState: _connectionState,
+            bridgeConnected: _bridgeConnected,
+            roomId: _roomId,
+            onDisconnect: _disconnect,
+          ),
+          const SizedBox(height: 24),
+          if (_connectionState == relay.ConnectionState.connected &&
+              _bridgeConnected) ...[
+            Text(
+              'ACCOUNTS (${_accountsNotifier.value.length})',
+              style: AppTextStyles.label,
+            ),
+            const SizedBox(height: 12),
+            Expanded(
+              child: _accountsNotifier.value.isEmpty
+                  ? _buildLoadingAccounts()
+                  : ValueListenableBuilder<List<Map<String, dynamic>>>(
+                      valueListenable: _accountsNotifier,
+                      builder: (context, accounts, _) {
+                        return ValueListenableBuilder<List<Map<String, dynamic>>>(
+                          valueListenable: _positionsNotifier,
+                          builder: (context, positions, _) {
+                            // Sort accounts with main account first
+                            final sortedAccounts = List<Map<String, dynamic>>.from(accounts);
+                            sortedAccounts.sort((a, b) {
+                              final aIsMain = a['account'] == _mainAccountNum;
+                              final bIsMain = b['account'] == _mainAccountNum;
+                              if (aIsMain && !bIsMain) return -1;
+                              if (!aIsMain && bIsMain) return 1;
+                              return (a['index'] as int? ?? 0).compareTo(b['index'] as int? ?? 0);
+                            });
+                            return ListView(
+                              children: [
+                                // Show totals section if more than 1 account
+                                if (sortedAccounts.length > 1)
+                                  _buildTotalsSection(sortedAccounts, positions),
+                                // Account cards
+                                ...sortedAccounts.map((account) => _buildAccountCard(account)),
+                              ],
+                            );
+                          },
+                        );
+                      },
+                    ),
+            ),
+          ] else
+            const Spacer(),
+          if (_connectionState == relay.ConnectionState.disconnected)
+            ScanButton(onPressed: _openScanner),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBottomNavBar() {
+    final isConnected = _connectionState == relay.ConnectionState.connected &&
+        _bridgeConnected &&
+        _accountsNotifier.value.isNotEmpty;
+    
+    if (!isConnected) return const SizedBox.shrink();
+    
+    return _buildNavBarContent(_selectedNavIndex, (index) {
+      setState(() {
+        _selectedNavIndex = index;
+      });
+    });
+  }
+
+  // Build nav bar for pushed screens (account detail -> position -> chart)
+  Widget _buildExternalNavBar(int selectedIndex) {
+    return _buildNavBarContent(selectedIndex, (index) {
+      // Pop all routes back to home and set the selected tab
+      Navigator.of(context).popUntil((route) => route.isFirst);
+      setState(() {
+        _selectedNavIndex = index;
+      });
+    });
+  }
+
+  Widget _buildNavBarContent(int selectedIndex, void Function(int) onTap) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: AppColors.surface,
+        border: Border(
+          top: BorderSide(color: AppColors.border, width: 1),
+        ),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              _buildNavItemWithCallback(Icons.home, 'Home', 0, selectedIndex, onTap),
+              _buildNavItemWithCallback(Icons.candlestick_chart, 'Chart', 1, selectedIndex, onTap),
+              _buildNavItemWithCallback(Icons.history, 'History', 2, selectedIndex, onTap),
+              _buildNavItemWithCallback(Icons.settings, 'Settings', 3, selectedIndex, onTap),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildNavItemWithCallback(IconData icon, String label, int index, int selectedIndex, void Function(int) onTap) {
+    final isSelected = selectedIndex == index;
+    return GestureDetector(
+      onTap: () => onTap(index),
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              color: isSelected ? AppColors.primary : AppColors.textSecondary,
+              size: 22,
+            ),
+            const SizedBox(height: 2),
+            Text(
+              label,
+              style: TextStyle(
+                color: isSelected ? AppColors.primary : AppColors.textSecondary,
+                fontSize: 10,
+                fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHeader() {
+    final showButtons = _connectionState == relay.ConnectionState.connected &&
+        _bridgeConnected &&
+        _accountsNotifier.value.isNotEmpty;
+    
+    return Row(
+      children: [
+        const Text('METASYNX', style: AppTextStyles.heading),
+        const Spacer(),
+        if (showButtons) ...[
+          IconButton(
+            icon: const Icon(Icons.calculate_outlined, color: AppColors.primary, size: 26),
+            onPressed: _openRiskCalculator,
+            tooltip: 'Risk Calculator',
+          ),
+          IconButton(
+            icon: const Icon(Icons.add_circle, color: AppColors.primary, size: 28),
+            onPressed: _openNewOrder,
+            tooltip: 'New Order',
+          ),
+        ],
+      ],
+    );
+  }
+
+  void _openRiskCalculator() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => RiskCalculatorScreen(
+          accounts: _accountsNotifier.value,
+          accountNames: _accountNames,
+          mainAccountNum: _mainAccountNum,
+          lotRatios: _lotRatios,
+          symbolSuffixes: _symbolSuffixes,
+          preferredPairs: _preferredPairs,
+          onPlaceOrder: _placeOrder,
+          onRequestSymbolInfo: _requestSymbolInfo,
+          symbolInfoStream: _symbolInfoController.stream,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLoadingAccounts() {
+    return const Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          CircularProgressIndicator(color: AppColors.primary),
+          SizedBox(height: 16),
+          Text('Loading accounts...', style: AppTextStyles.body),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTotalsSection(List<Map<String, dynamic>> accounts, List<Map<String, dynamic>> positions) {
+    double totalBalance = 0;
+    double totalEquity = 0;
+    double totalProfit = 0;
+    
+    for (final account in accounts) {
+      totalBalance += (account['balance'] as num?)?.toDouble() ?? 0;
+      totalEquity += (account['equity'] as num?)?.toDouble() ?? 0;
+      
+      final accountIndex = account['index'] as int? ?? -1;
+      final accountPositions = positions.where((p) => p['terminalIndex'] == accountIndex);
+      
+      for (final pos in accountPositions) {
+        final rawProfit = (pos['profit'] as num?)?.toDouble() ?? 0;
+        if (_includeCommissionSwap) {
+          final swap = (pos['swap'] as num?)?.toDouble() ?? 0;
+          final commission = (pos['commission'] as num?)?.toDouble() ?? 0;
+          totalProfit += rawProfit + swap + commission;
+        } else {
+          totalProfit += rawProfit;
+        }
       }
-   }
-   else if(action == "modify_position")
-   {
-      int ticket = (int)StringToInteger(ExtractJsonString(jsonCommand, "ticket"));
-      double sl = StringToDouble(ExtractJsonString(jsonCommand, "sl"));
-      double tp = StringToDouble(ExtractJsonString(jsonCommand, "tp"));
-      Print("MODIFY COMMAND: ticket=", ticket, " sl=", sl, " tp=", tp);
-      ModifyPosition(ticket, sl, tp);
-   }
-   else if(action == "cancel_order")
-   {
-      int ticket = (int)StringToInteger(ExtractJsonString(jsonCommand, "ticket"));
-      Print("CANCEL ORDER COMMAND: ticket=", ticket);
-      CancelPendingOrder(ticket);
-   }
-   else if(action == "modify_pending")
-   {
-      int ticket = (int)StringToInteger(ExtractJsonString(jsonCommand, "ticket"));
-      double price = StringToDouble(ExtractJsonString(jsonCommand, "price"));
-      Print("MODIFY PENDING COMMAND: ticket=", ticket, " price=", price);
-      ModifyPendingOrder(ticket, price);
-   }
-   else if(action == "get_chart_data")
-   {
-      string symbol = ExtractJsonString(jsonCommand, "symbol");
-      string tf = ExtractJsonString(jsonCommand, "timeframe");
-      int count = (int)StringToInteger(ExtractJsonString(jsonCommand, "count"));
-      if(count <= 0) count = 200;
-      
-      // Ensure symbol is in Market Watch
-      SymbolSelect(symbol, true);
-      
-      int timeframe = StringToTimeframe(tf);
-      Print("CHART DATA: symbol=", symbol, " tf=", tf, " (", timeframe, ") count=", count);
-      WriteChartData(symbol, timeframe, count);
-   }
-   else if(action == "subscribe_chart")
-   {
-      g_chartSymbol = ExtractJsonString(jsonCommand, "symbol");
-      string tf = ExtractJsonString(jsonCommand, "timeframe");
-      g_chartTimeframe = StringToTimeframe(tf);
-      Print("CHART SUBSCRIBE: symbol=", g_chartSymbol, " tf=", g_chartTimeframe);
-      
-      // Send initial history data
-      WriteChartData(g_chartSymbol, g_chartTimeframe, 200);
-      
-      // Start subscription but delay updates for ~2 seconds (4 timer cycles at 500ms)
-      // This gives the bridge time to read the history data
-      g_chartDelayCount = 4;
-      g_chartSubscribed = true;
-   }
-   else if(action == "unsubscribe_chart")
-   {
-      g_chartSubscribed = false;
-      g_chartSymbol = "";
-      Print("CHART UNSUBSCRIBE");
-   }
-   else if(action == "get_history")
-   {
-      string period = ExtractJsonString(jsonCommand, "period"); // today, week, month
-      Print("HISTORY REQUEST: period=", period);
-      WriteHistory(period);
-   }
-}
+    }
 
-//+------------------------------------------------------------------+
-//| Write closed positions history                                     |
-//+------------------------------------------------------------------+
-void WriteHistory(string period)
-{
-   datetime startTime;
-   datetime now = TimeCurrent();
-   
-   // Calculate start time based on period
-   if(period == "today")
-   {
-      // Start of today (midnight)
-      startTime = now - (now % 86400);
-   }
-   else if(period == "week")
-   {
-      // 7 days ago
-      startTime = now - (7 * 86400);
-   }
-   else if(period == "month")
-   {
-      // 30 days ago
-      startTime = now - (30 * 86400);
-   }
-   else
-   {
-      // Default to today
-      startTime = now - (now % 86400);
-   }
-   
-   string json = "{\"index\":" + IntegerToString(g_terminalIndex) + ",";
-   json += "\"account\":\"" + IntegerToString(AccountNumber()) + "\",";
-   json += "\"period\":\"" + period + "\",";
-   json += "\"history\":[";
-   
-   int count = 0;
-   int total = OrdersHistoryTotal();
-   
-   for(int i = total - 1; i >= 0; i--)
-   {
-      if(!OrderSelect(i, SELECT_BY_POS, MODE_HISTORY)) continue;
-      
-      // Only include orders closed after start time
-      if(OrderCloseTime() < startTime) continue;
-      
-      // Only include actual trades (buy/sell), not pending orders
-      if(OrderType() > OP_SELL) continue;
-      
-      if(count > 0) json += ",";
-      
-      json += "{";
-      json += "\"ticket\":" + IntegerToString(OrderTicket()) + ",";
-      json += "\"symbol\":\"" + OrderSymbol() + "\",";
-      json += "\"type\":\"" + GetOrderTypeString(OrderType()) + "\",";
-      json += "\"lots\":" + DoubleToString(OrderLots(), 2) + ",";
-      json += "\"openPrice\":" + DoubleToString(OrderOpenPrice(), (int)MarketInfo(OrderSymbol(), MODE_DIGITS)) + ",";
-      json += "\"closePrice\":" + DoubleToString(OrderClosePrice(), (int)MarketInfo(OrderSymbol(), MODE_DIGITS)) + ",";
-      json += "\"openTime\":" + IntegerToString((int)OrderOpenTime()) + ",";
-      json += "\"closeTime\":" + IntegerToString((int)OrderCloseTime()) + ",";
-      json += "\"profit\":" + DoubleToString(OrderProfit(), 2) + ",";
-      json += "\"swap\":" + DoubleToString(OrderSwap(), 2) + ",";
-      json += "\"commission\":" + DoubleToString(OrderCommission(), 2) + ",";
-      json += "\"magic\":" + IntegerToString(OrderMagicNumber());
-      json += "}";
-      
-      count++;
-      
-      // Limit to 500 trades to avoid huge files
-      if(count >= 500) break;
-   }
-   
-   json += "]}";
-   
-   // Write to history file
-   string filename = BridgeFolder + "\\history_" + IntegerToString(g_terminalIndex) + ".json";
-   int handle = FileOpen(filename, FILE_WRITE|FILE_TXT|FILE_COMMON);
-   if(handle != INVALID_HANDLE)
-   {
-      FileWriteString(handle, json);
-      FileClose(handle);
-      Print("History written: ", count, " trades for period ", period);
-   }
-}
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            AppColors.primaryWithOpacity(0.15),
+            AppColors.primaryWithOpacity(0.05),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.primary.withOpacity(0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'TOTAL',
+            style: TextStyle(
+              color: AppColors.primary,
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 1,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Balance', style: TextStyle(color: AppColors.textSecondary, fontSize: 11)),
+                    const SizedBox(height: 2),
+                    Text(
+                      Formatters.formatCurrency(totalBalance),
+                      style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Equity', style: TextStyle(color: AppColors.textSecondary, fontSize: 11)),
+                    const SizedBox(height: 2),
+                    Text(
+                      Formatters.formatCurrency(totalEquity),
+                      style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          _includeCommissionSwap ? 'Net P/L' : 'P/L',
+                          style: const TextStyle(color: AppColors.textSecondary, fontSize: 11),
+                        ),
+                        if (_showPLPercent && totalBalance > 0) ...[
+                          const SizedBox(width: 8),
+                          Text(
+                            '${((totalProfit / totalBalance) * 100).toStringAsFixed(2)}%',
+                            style: TextStyle(
+                              color: totalProfit == 0 
+                                  ? Colors.white 
+                                  : (totalProfit > 0 ? AppColors.primary : AppColors.error),
+                              fontSize: 11,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      Formatters.formatCurrencyWithSign(totalProfit),
+                      style: TextStyle(
+                        color: totalProfit >= 0 ? AppColors.primary : AppColors.error,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
 
-//+------------------------------------------------------------------+
-//| Place order                                                       |
-//+------------------------------------------------------------------+
-void PlaceOrder(string symbol, string type, double lots, double sl, double tp, double pendingPrice, int magic)
-{
-   // Ensure symbol is in Market Watch
-   if(!SymbolSelect(symbol, true))
-   {
-      Print("Warning: Could not add symbol to Market Watch: ", symbol);
-   }
-   
-   // Wait a moment for symbol data to load
-   Sleep(100);
-   RefreshRates();
-   
-   int orderType;
-   double price;
-   color arrowColor;
-   bool isPending = false;
-   
-   // Market orders
-   if(type == "buy") { orderType = OP_BUY; price = MarketInfo(symbol, MODE_ASK); arrowColor = clrGreen; }
-   else if(type == "sell") { orderType = OP_SELL; price = MarketInfo(symbol, MODE_BID); arrowColor = clrRed; }
-   // Pending orders
-   else if(type == "buy_limit") { orderType = OP_BUYLIMIT; price = pendingPrice; arrowColor = clrGreen; isPending = true; }
-   else if(type == "sell_limit") { orderType = OP_SELLLIMIT; price = pendingPrice; arrowColor = clrRed; isPending = true; }
-   else if(type == "buy_stop") { orderType = OP_BUYSTOP; price = pendingPrice; arrowColor = clrGreen; isPending = true; }
-   else if(type == "sell_stop") { orderType = OP_SELLSTOP; price = pendingPrice; arrowColor = clrRed; isPending = true; }
-   else { WriteResponse(false, "Invalid order type: " + type, 0); return; }
-   
-   // Check if symbol data is available
-   if(MarketInfo(symbol, MODE_BID) == 0)
-   {
-      // Try waiting a bit longer for data
-      Sleep(500);
-      RefreshRates();
-      if(MarketInfo(symbol, MODE_BID) == 0)
-      {
-         WriteResponse(false, "Symbol not available: " + symbol, 0);
-         return;
+  Widget _buildAccountCard(Map<String, dynamic> account) {
+    final balance = (account['balance'] as num?)?.toDouble() ?? 0;
+    final equity = (account['equity'] as num?)?.toDouble() ?? 0;
+    final accountNum = account['account'] as String? ?? 'Unknown';
+    final accountIndex = account['index'] as int? ?? -1;
+    final currency = account['currency'] as String? ?? 'USD';
+    final displayName = getAccountDisplayName(account);
+    final hasCustomName = _accountNames[accountNum]?.isNotEmpty == true;
+    final isMainAccount = _mainAccountNum == accountNum;
+    
+    // Calculate P/L from positions based on setting
+    final accountPositions = _positionsNotifier.value.where(
+      (p) => p['terminalIndex'] == accountIndex
+    ).toList();
+    
+    double profit = 0;
+    for (final pos in accountPositions) {
+      final rawProfit = (pos['profit'] as num?)?.toDouble() ?? 0;
+      if (_includeCommissionSwap) {
+        final swap = (pos['swap'] as num?)?.toDouble() ?? 0;
+        final commission = (pos['commission'] as num?)?.toDouble() ?? 0;
+        profit += rawProfit + swap + commission;
+      } else {
+        profit += rawProfit;
       }
-   }
-   
-   // For pending orders, validate the price
-   if(isPending && pendingPrice <= 0)
-   {
-      WriteResponse(false, "Invalid pending order price", 0);
-      return;
-   }
-   
-   double minLot = MarketInfo(symbol, MODE_MINLOT);
-   double maxLot = MarketInfo(symbol, MODE_MAXLOT);
-   double lotStep = MarketInfo(symbol, MODE_LOTSTEP);
-   lots = NormalizeDouble(MathRound(MathMax(minLot, MathMin(maxLot, lots)) / lotStep) * lotStep, 2);
-   
-   int digits = (int)MarketInfo(symbol, MODE_DIGITS);
-   price = NormalizeDouble(price, digits);
-   if(sl > 0) sl = NormalizeDouble(sl, digits);
-   if(tp > 0) tp = NormalizeDouble(tp, digits);
-   
-   int ticket = OrderSend(symbol, orderType, lots, price, 30, sl, tp, "MetaSynx", magic, 0, arrowColor);
-   
-   string orderTypeStr = isPending ? type : (type == "buy" ? "market buy" : "market sell");
-   if(ticket > 0) { WriteResponse(true, "Order placed", ticket); Print("Order placed (", orderTypeStr, "): ", ticket); }
-   else { int err = GetLastError(); WriteResponse(false, "Error " + IntegerToString(err), 0); Print("Order failed: ", err); }
-}
+    }
 
-//+------------------------------------------------------------------+
-//| Close position (full or partial)                                  |
-//| closeLots: 0 = close all, >0 = close specified lots               |
-//+------------------------------------------------------------------+
-void ClosePosition(int ticket, double closeLots = 0)
-{
-   if(!OrderSelect(ticket, SELECT_BY_TICKET))
-   {
-      Print("CLOSE FAILED: Ticket not found: ", ticket);
-      WriteResponse(false, "Ticket not found", ticket);
-      return;
-   }
-   
-   if(OrderCloseTime() != 0)
-   {
-      Print("CLOSE FAILED: Already closed: ", ticket);
-      WriteResponse(false, "Already closed", ticket);
-      return;
-   }
-   
-   RefreshRates();
-   
-   string symbol = OrderSymbol();
-   double positionLots = OrderLots();
-   int orderType = OrderType();
-   double price = orderType == OP_BUY ? MarketInfo(symbol, MODE_BID) : MarketInfo(symbol, MODE_ASK);
-   price = NormalizeDouble(price, (int)MarketInfo(symbol, MODE_DIGITS));
-   
-   // Determine lots to close
-   double lotsToClose;
-   if(closeLots <= 0 || closeLots >= positionLots)
-   {
-      lotsToClose = positionLots; // Close all
-   }
-   else
-   {
-      // Partial close - normalize to lot step
-      double lotStep = MarketInfo(symbol, MODE_LOTSTEP);
-      double minLot = MarketInfo(symbol, MODE_MINLOT);
-      
-      lotsToClose = MathFloor(closeLots / lotStep) * lotStep;
-      if(lotsToClose < minLot) lotsToClose = minLot;
-      
-      // Ensure remaining lots won't be less than min lot
-      double remainingLots = positionLots - lotsToClose;
-      if(remainingLots > 0 && remainingLots < minLot)
-      {
-         // Close all instead to avoid invalid remaining position
-         lotsToClose = positionLots;
-      }
-   }
-   
-   Print("CLOSING: ticket=", ticket, " symbol=", symbol, " lots=", lotsToClose, "/", positionLots, " price=", price);
-   
-   bool result = OrderClose(ticket, lotsToClose, price, 30, clrYellow);
-   
-   if(result)
-   {
-      if(lotsToClose < positionLots)
-      {
-         Print("PARTIAL CLOSE SUCCESS: ", ticket, " closed=", lotsToClose, " remaining=", positionLots - lotsToClose);
-         WriteResponse(true, "Partially closed", ticket);
-      }
-      else
-      {
-         Print("CLOSE SUCCESS: ", ticket);
-         WriteResponse(true, "Closed", ticket);
-      }
-   }
-   else
-   {
-      int err = GetLastError();
-      Print("CLOSE FAILED: ", ticket, " error=", err);
-      WriteResponse(false, "Error " + IntegerToString(err), ticket);
-   }
-}
+    return GestureDetector(
+      onTap: () => _openAccountDetail(account),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Account number & name
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              displayName,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          if (isMainAccount) ...[
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: AppColors.primary,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: const Text(
+                                'MAIN',
+                                style: TextStyle(
+                                  color: Colors.black,
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                      if (hasCustomName)
+                        Text(
+                          accountNum,
+                          style: const TextStyle(
+                            color: AppColors.textSecondary,
+                            fontSize: 12,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                const Icon(
+                  Icons.chevron_right,
+                  color: AppColors.textSecondary,
+                  size: 20,
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            // Balance, Equity, P/L row
+            Row(
+              children: [
+                Expanded(
+                  child: _buildStatColumn('Balance', balance, currency),
+                ),
+                Expanded(
+                  child: _buildStatColumn('Equity', equity, currency),
+                ),
+                Expanded(
+                  child: _buildPLColumn(profit, balance, currency, _includeCommissionSwap),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
-//+------------------------------------------------------------------+
-//| Modify position                                                   |
-//| sl/tp: -1 = keep existing, 0 = remove, >0 = set new value        |
-//+------------------------------------------------------------------+
-void ModifyPosition(int ticket, double sl, double tp)
-{
-   if(!OrderSelect(ticket, SELECT_BY_TICKET))
-   {
-      Print("MODIFY FAILED: Ticket not found: ", ticket);
-      WriteResponse(false, "Ticket not found", ticket);
-      return;
-   }
-   
-   if(OrderCloseTime() != 0)
-   {
-      Print("MODIFY FAILED: Already closed: ", ticket);
-      WriteResponse(false, "Already closed", ticket);
-      return;
-   }
-   
-   int digits = (int)MarketInfo(OrderSymbol(), MODE_DIGITS);
-   
-   // -1 means keep existing, 0 means remove, >0 means set new value
-   double newSL;
-   if(sl < 0) newSL = OrderStopLoss();        // Keep existing
-   else if(sl == 0) newSL = 0;                 // Remove SL
-   else newSL = NormalizeDouble(sl, digits);   // Set new value
-   
-   double newTP;
-   if(tp < 0) newTP = OrderTakeProfit();       // Keep existing
-   else if(tp == 0) newTP = 0;                 // Remove TP
-   else newTP = NormalizeDouble(tp, digits);   // Set new value
-   
-   Print("MODIFYING: ticket=", ticket, " newSL=", newSL, " newTP=", newTP);
-   
-   bool result = OrderModify(ticket, OrderOpenPrice(), newSL, newTP, 0, clrBlue);
-   
-   if(result)
-   {
-      Print("MODIFY SUCCESS: ", ticket);
-      WriteResponse(true, "Modified", ticket);
-   }
-   else
-   {
-      int err = GetLastError();
-      if(err == 1) { WriteResponse(true, "No change needed", ticket); }
-      else { Print("MODIFY FAILED: ", ticket, " error=", err); WriteResponse(false, "Error " + IntegerToString(err), ticket); }
-   }
-}
+  Widget _buildStatColumn(String label, double value, String currency) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: const TextStyle(color: AppColors.textSecondary, fontSize: 11)),
+        const SizedBox(height: 2),
+        Text(
+          Formatters.formatCurrency(value),
+          style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
+        ),
+      ],
+    );
+  }
 
-//+------------------------------------------------------------------+
-//| Cancel pending order                                               |
-//+------------------------------------------------------------------+
-void CancelPendingOrder(int ticket)
-{
-   if(!OrderSelect(ticket, SELECT_BY_TICKET))
-   {
-      Print("CANCEL FAILED: Ticket not found: ", ticket);
-      WriteResponse(false, "Ticket not found", ticket);
-      return;
-   }
-   
-   if(OrderCloseTime() != 0)
-   {
-      Print("CANCEL FAILED: Already closed/cancelled: ", ticket);
-      WriteResponse(false, "Already closed", ticket);
-      return;
-   }
-   
-   int orderType = OrderType();
-   if(orderType < OP_BUYLIMIT)
-   {
-      Print("CANCEL FAILED: Not a pending order: ", ticket);
-      WriteResponse(false, "Not a pending order", ticket);
-      return;
-   }
-   
-   bool result = OrderDelete(ticket, clrRed);
-   
-   if(result)
-   {
-      Print("CANCEL SUCCESS: ", ticket);
-      WriteResponse(true, "Order cancelled", ticket);
-   }
-   else
-   {
-      int err = GetLastError();
-      Print("CANCEL FAILED: ", ticket, " error=", err);
-      WriteResponse(false, "Error " + IntegerToString(err), ticket);
-   }
+  Widget _buildPLColumn(double profit, double balance, String currency, bool isNetPL) {
+    final isPositive = profit >= 0;
+    final plPercent = balance > 0 ? (profit / balance) * 100 : 0.0;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Text(isNetPL ? 'Net P/L' : 'P/L', style: const TextStyle(color: AppColors.textSecondary, fontSize: 11)),
+            if (_showPLPercent && balance > 0) ...[
+              const SizedBox(width: 8),
+              Text(
+                '${plPercent.toStringAsFixed(2)}%',
+                style: TextStyle(
+                  color: profit == 0 
+                      ? Colors.white 
+                      : (profit > 0 ? AppColors.primary : AppColors.error),
+                  fontSize: 11,
+                ),
+              ),
+            ],
+          ],
+        ),
+        const SizedBox(height: 2),
+        Text(
+          Formatters.formatCurrencyWithSign(profit),
+          style: TextStyle(
+            color: isPositive ? AppColors.primary : AppColors.error,
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+  }
 }
-
-//+------------------------------------------------------------------+
-//| Modify pending order price                                         |
-//+------------------------------------------------------------------+
-void ModifyPendingOrder(int ticket, double newPrice)
-{
-   if(!OrderSelect(ticket, SELECT_BY_TICKET))
-   {
-      Print("MODIFY PENDING FAILED: Ticket not found: ", ticket);
-      WriteResponse(false, "Ticket not found", ticket);
-      return;
-   }
-   
-   if(OrderCloseTime() != 0)
-   {
-      Print("MODIFY PENDING FAILED: Already closed: ", ticket);
-      WriteResponse(false, "Already closed", ticket);
-      return;
-   }
-   
-   int orderType = OrderType();
-   if(orderType < OP_BUYLIMIT)
-   {
-      Print("MODIFY PENDING FAILED: Not a pending order: ", ticket);
-      WriteResponse(false, "Not a pending order", ticket);
-      return;
-   }
-   
-   int digits = (int)MarketInfo(OrderSymbol(), MODE_DIGITS);
-   newPrice = NormalizeDouble(newPrice, digits);
-   
-   Print("MODIFY PENDING: ticket=", ticket, " newPrice=", newPrice);
-   
-   bool result = OrderModify(ticket, newPrice, OrderStopLoss(), OrderTakeProfit(), 0, clrBlue);
-   
-   if(result)
-   {
-      Print("MODIFY PENDING SUCCESS: ", ticket);
-      WriteResponse(true, "Order modified", ticket);
-   }
-   else
-   {
-      int err = GetLastError();
-      if(err == 1) { WriteResponse(true, "No change needed", ticket); }
-      else { Print("MODIFY PENDING FAILED: ", ticket, " error=", err); WriteResponse(false, "Error " + IntegerToString(err), ticket); }
-   }
-}
-
-//+------------------------------------------------------------------+
-//| Write response                                                    |
-//+------------------------------------------------------------------+
-void WriteResponse(bool success, string message, int ticket)
-{
-   string json = "{\"index\":" + IntegerToString(g_terminalIndex) + ",";
-   json += "\"account\":\"" + IntegerToString(AccountNumber()) + "\",";
-   json += "\"success\":" + (success ? "true" : "false") + ",";
-   json += "\"message\":\"" + message + "\",";
-   json += "\"ticket\":" + IntegerToString(ticket) + "}";
-   
-   int handle = FileOpen(g_responseFile, FILE_WRITE|FILE_TXT|FILE_COMMON);
-   if(handle != INVALID_HANDLE) { FileWriteString(handle, json); FileClose(handle); }
-}
-
-//+------------------------------------------------------------------+
-//| Extract JSON string                                               |
-//+------------------------------------------------------------------+
-string ExtractJsonString(string json, string key)
-{
-   string searchKey = "\"" + key + "\":";
-   int pos = StringFind(json, searchKey);
-   if(pos < 0) return "";
-   
-   int valueStart = pos + StringLen(searchKey);
-   while(valueStart < StringLen(json) && StringGetCharacter(json, valueStart) == ' ') valueStart++;
-   if(valueStart >= StringLen(json)) return "";
-   
-   if(StringGetCharacter(json, valueStart) == '"')
-   {
-      valueStart++;
-      int valueEnd = StringFind(json, "\"", valueStart);
-      if(valueEnd > valueStart) return StringSubstr(json, valueStart, valueEnd - valueStart);
-   }
-   else
-   {
-      int valueEnd = valueStart;
-      while(valueEnd < StringLen(json))
-      {
-         ushort c = StringGetCharacter(json, valueEnd);
-         if(c == ',' || c == '}' || c == ' ' || c == '\n' || c == '\r') break;
-         valueEnd++;
-      }
-      return StringSubstr(json, valueStart, valueEnd - valueStart);
-   }
-   return "";
-}
-
-//+------------------------------------------------------------------+
-//| Get order type string                                             |
-//+------------------------------------------------------------------+
-string GetOrderTypeString(int type)
-{
-   switch(type)
-   {
-      case OP_BUY: return "buy";
-      case OP_SELL: return "sell";
-      case OP_BUYLIMIT: return "buy_limit";
-      case OP_SELLLIMIT: return "sell_limit";
-      case OP_BUYSTOP: return "buy_stop";
-      case OP_SELLSTOP: return "sell_stop";
-      default: return "unknown";
-   }
-}
-
-void OnTick() { }

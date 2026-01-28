@@ -2,7 +2,7 @@ import os
 import time
 
 
-msg = 'added partial close'
+msg = 'adding risk calculator 1'
 
 
 os.system('git add .')

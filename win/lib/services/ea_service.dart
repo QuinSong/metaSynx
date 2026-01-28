@@ -242,6 +242,54 @@ class EAService {
     });
   }
 
+  /// Get symbol info for risk calculator
+  Future<Map<String, dynamic>?> getSymbolInfo(String symbol, int terminalIndex) async {
+    if (_commonDataPath == null) return null;
+    
+    // Send command to EA
+    final success = await sendCommandToTerminal(terminalIndex, {
+      'action': 'get_symbol_info',
+      'symbol': symbol,
+    });
+    
+    if (!success) return null;
+    
+    // Wait a bit for EA to process and write response
+    await Future.delayed(const Duration(milliseconds: 300));
+    
+    // Read response file
+    final filePath = '$_commonDataPath\\Files\\$_bridgeFolder\\response_$terminalIndex.json';
+    final file = File(filePath);
+    
+    for (int i = 0; i < 10; i++) {
+      if (!await file.exists()) {
+        await Future.delayed(const Duration(milliseconds: 100));
+        continue;
+      }
+      
+      try {
+        final content = await _readFileSafe(file);
+        if (content == null || content.isEmpty) {
+          await Future.delayed(const Duration(milliseconds: 100));
+          continue;
+        }
+        
+        final data = jsonDecode(content) as Map<String, dynamic>;
+        if (data['type'] == 'symbol_info' && data['symbol'] == symbol) {
+          // Delete response file after reading
+          try { await file.delete(); } catch (_) {}
+          return data;
+        }
+      } catch (e) {
+        onLog?.call('Error reading symbol info: $e');
+      }
+      
+      await Future.delayed(const Duration(milliseconds: 100));
+    }
+    
+    return null;
+  }
+
   /// Get chart data - sends command to EA and reads response
   /// This is fire-and-forget to avoid blocking other commands
   Future<Map<String, dynamic>?> getChartData(String symbol, String timeframe, int terminalIndex) async {

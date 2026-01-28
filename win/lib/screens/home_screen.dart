@@ -140,8 +140,36 @@ class _HomeScreenState extends State<HomeScreen> {
         _handleGetHistory(message);
         break;
 
+      case 'get_symbol_info':
+        _handleGetSymbolInfo(message);
+        break;
+
       default:
         _addLog('Unknown action: $action');
+    }
+  }
+
+  Future<void> _handleGetSymbolInfo(Map<String, dynamic> message) async {
+    final symbol = message['symbol'] as String?;
+    final terminalIndex = message['terminalIndex'] as int? ?? 0;
+    
+    if (symbol == null || symbol.isEmpty) {
+      _addLog('Get symbol info: missing symbol');
+      return;
+    }
+    
+    _addLog('Getting symbol info: $symbol from terminal $terminalIndex');
+    final info = await _eaService.getSymbolInfo(symbol, terminalIndex);
+    
+    if (info != null) {
+      _connection?.send({
+        'action': 'symbol_info',
+        'symbol': symbol,
+        ...info,
+      });
+      _addLog('Symbol info sent: $symbol pipValue=${info['pipValue']}');
+    } else {
+      _addLog('Failed to get symbol info for $symbol');
     }
   }
 
