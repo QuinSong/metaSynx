@@ -6,10 +6,6 @@ flutter run -d windows
 rm -r -fo metaSynx; git clone git@github.com:QuinSong/metaSynx.git; cd metaSynx/win; flutter run -d windows
 
 
-In Google Cloud Console:
-VPC Network → Firewall rules
-Allow TCP 80 and 443
-
 sudo apt update
 sudo apt install -y python3-pip
 sudo apt install -y tmux
@@ -25,30 +21,3 @@ sudo certbot certonly \
   --dns-cloudflare-credentials /root/.secrets/cloudflare.ini \
   --dns-cloudflare-propagation-seconds 60 \
   -d server1.metasynx.io
-
-
-sudo python3 -m venv /opt/metasynx/venv
-sudo /opt/metasynx/venv/bin/pip install fastapi uvicorn websockets
-
-scp websocket_relay.py quinsong@34.147.82.105:/tmp/
-scp metasynx-relay.service quinsong@34.147.82.105:/tmp/
-
-# Create directory and move files
-sudo mkdir -p /opt/metasynx
-sudo mv /tmp/websocket_relay.py /opt/metasynx/
-sudo mv /tmp/metasynx-relay.service /etc/systemd/system/
-sudo chmod +x /opt/metasynx/websocket_relay.py
-
-# Enable and start service
-sudo systemctl daemon-reload
-sudo systemctl enable metasynx-relay
-sudo systemctl start metasynx-relay
-
-sudo systemctl daemon-reload
-sudo systemctl restart metasynx-relay
-
-# 5. Check status
-sudo systemctl status metasynx-relay
-
-# 6. Test
-curl https://server1.metasynx.io/health

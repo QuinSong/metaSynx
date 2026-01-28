@@ -2,7 +2,7 @@ import os
 import time
 
 
-msg = 'strating with gcloud relay 1'
+msg = 'gcloud relay complete via server1.metasynx.io'
 
 
 os.system('git add .')

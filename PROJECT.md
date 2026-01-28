@@ -109,8 +109,11 @@ metaSynx/
 │           ├── relay_connection.dart      # WebSocket to relay
 │           └── room_service.dart          # Room creation API
 │
+├── server/                       # Relay Server (Python/FastAPI)
+│   ├── websocket_relay.py        # Main relay server
+│   └── metasynx-relay.service    # Systemd service file
+│
 ├── MetaSynxEA.mq4                # MT4 Expert Advisor
-├── websocket_relay.py            # FastAPI WebSocket relay server
 └── PROJECT.md                    # This documentation file
 ```
 
@@ -575,13 +578,114 @@ flutter run -d windows
 4. Enable "Allow DLL imports" and "Allow live trading"
 
 ### Relay Server
+
+**Production Server:** `https://server1.metasynx.io`
+
+See [Server Deployment Guide](#server-deployment-guide) below for full setup instructions.
+
+---
+
+## Server Deployment Guide
+
+Complete instructions for deploying the relay server on a new Google Cloud VM.
+
+### Prerequisites
+- Google Cloud VM (Ubuntu 22.04+ recommended)
+- Domain pointing to VM IP (e.g., `server1.metasynx.io`)
+- SSL certificate (Let's Encrypt)
+- Port 443 open in firewall
+
+### Step 1: Set Up SSL Certificate (if not done)
 ```bash
-pip install fastapi uvicorn websockets
-# Add router to your FastAPI app:
-# from websocket_relay import router as relay_router
-# app.include_router(relay_router, prefix="/ws")
-uvicorn main:app --host 0.0.0.0 --port 8443 --ssl-keyfile key.pem --ssl-certfile cert.pem
+sudo apt update
+sudo apt install certbot -y
+sudo certbot certonly --standalone -d YOUR_DOMAIN
 ```
+
+### Step 2: Copy Files to Server
+From your local machine:
+```bash
+scp server/websocket_relay.py quinsong@34.147.82.105:/tmp/
+scp server/metasynx-relay.service quinsong@34.147.82.105:/tmp/
+```
+
+### Step 3: SSH and Install
+```bash
+ssh USERNAME@YOUR_DOMAIN
+
+# Create directory and move files
+sudo mkdir -p /opt/metasynx
+sudo mv /tmp/websocket_relay.py /opt/metasynx/
+sudo mv /tmp/metasynx-relay.service /etc/systemd/system/
+
+# Create virtual environment and install dependencies
+sudo python3 -m venv /opt/metasynx/venv
+sudo /opt/metasynx/venv/bin/pip install fastapi uvicorn websockets
+
+# Make executable
+sudo chmod +x /opt/metasynx/websocket_relay.py
+```
+
+### Step 4: Update Configuration
+Edit `/opt/metasynx/websocket_relay.py` and update:
+```python
+SERVER_HOST = "YOUR_DOMAIN"  # e.g., "server1.metasynx.io"
+```
+
+Also update the SSL paths in the file if different:
+```python
+parser.add_argument("--cert", default="/etc/letsencrypt/live/YOUR_DOMAIN/fullchain.pem")
+parser.add_argument("--key", default="/etc/letsencrypt/live/YOUR_DOMAIN/privkey.pem")
+```
+
+### Step 5: Enable and Start Service
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable metasynx-relay
+sudo systemctl start metasynx-relay
+sudo systemctl status metasynx-relay
+```
+
+### Step 6: Open Firewall (Google Cloud)
+```bash
+gcloud compute firewall-rules create allow-https \
+    --allow tcp:443 \
+    --source-ranges 0.0.0.0/0 \
+    --description "Allow HTTPS traffic"
+```
+
+### Step 7: Verify
+```bash
+curl https://YOUR_DOMAIN/health
+# Should return: {"status":"healthy"}
+```
+
+### Useful Commands
+```bash
+# View logs
+sudo journalctl -u metasynx-relay -f
+
+# Restart service
+sudo systemctl restart metasynx-relay
+
+# Stop service
+sudo systemctl stop metasynx-relay
+
+# Check status
+sudo systemctl status metasynx-relay
+```
+
+### Server Configuration
+
+| Setting | Value |
+|---------|-------|
+| Server URL | `server1.metasynx.io` |
+| Port | `443` |
+| API Key | `msxkey2026` |
+| SSL Cert | `/etc/letsencrypt/live/server1.metasynx.io/fullchain.pem` |
+| SSL Key | `/etc/letsencrypt/live/server1.metasynx.io/privkey.pem` |
+| Install Path | `/opt/metasynx/` |
+| Venv Path | `/opt/metasynx/venv/` |
 
 ---
 
@@ -594,10 +698,11 @@ uvicorn main:app --host 0.0.0.0 --port 8443 --ssl-keyfile key.pem --ssl-certfile
 | - Core/Services/Components/Utils | 612 |
 | **Windows Bridge (Dart)** | 1,221 |
 | **MT4 EA (MQL4)** | 1,052 |
-| **Relay Server (Python)** | 394 |
-| **Total** | ~14,386 |
+| **Relay Server (Python)** | 430 |
+| **Total** | ~14,422 |
 
 ---
 
 *Last Updated: January 28, 2026*
 *EA Version: 2.10*
+*Server: server1.metasynx.io*
