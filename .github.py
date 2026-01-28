@@ -2,7 +2,7 @@ import os
 import time
 
 
-msg = 'add risk calculator complete'
+msg = 'strating with gcloud relay 1'
 
 
 os.system('git add .')

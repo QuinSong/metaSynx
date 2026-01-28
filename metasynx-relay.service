@@ -1,0 +1,16 @@
+[Unit]
+Description=MetaSynx Relay Server
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/metasynx
+ExecStart=/opt/metasynx/venv/bin/python /opt/metasynx/websocket_relay.py --ssl
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -1,31 +1,58 @@
+#!/usr/bin/env python3
 """
-WebSocket Relay for MT4 Bridge Pairing
-Add this to your existing FastAPI server
+MetaSynx WebSocket Relay Server
+Standalone FastAPI server for MT4 Bridge <-> Mobile App communication
 
 Usage:
-    from websocket_relay import router as relay_router
-    app.include_router(relay_router, prefix="/ws")
+    # Development
+    python websocket_relay.py
+    
+    # Production with SSL (port 443)
+    sudo python websocket_relay.py --ssl --cert /etc/letsencrypt/live/server1.metasynx.io/fullchain.pem --key /etc/letsencrypt/live/server1.metasynx.io/privkey.pem
+
+    # Or use systemd service (recommended)
 """
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Header, Request
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Header, Request
+from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional
 import asyncio
 import json
 import secrets
+import argparse
+import uvicorn
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-
-router = APIRouter()
 
 # ============================================
 # CONFIGURATION
 # ============================================
 
-API_KEY = "YOUR_API_KEY_HERE"  # Set this to match your existing API key
-ROOM_EXPIRY_MINUTES = 30       # Room expires if no activity
-ROOM_CODE_LENGTH = 8           # Length of room codes
-ROOM_SECRET_LENGTH = 16        # Length of room secrets
-MAX_ROOMS_PER_IP = 10          # Prevent abuse
+API_KEY = "msxkey2026"              # API key for authentication
+ROOM_EXPIRY_MINUTES = 30            # Room expires if no activity
+ROOM_CODE_LENGTH = 8                # Length of room codes
+ROOM_SECRET_LENGTH = 16             # Length of room secrets
+MAX_ROOMS_PER_IP = 10               # Prevent abuse
+SERVER_HOST = "server1.metasynx.io" # Server hostname for WebSocket URL
+
+# ============================================
+# FASTAPI APP
+# ============================================
+
+app = FastAPI(
+    title="MetaSynx Relay Server",
+    description="WebSocket relay for MT4 Bridge pairing",
+    version="1.0.0"
+)
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # ============================================
 # DATA STRUCTURES
@@ -76,6 +103,7 @@ class RelayManager:
             await asyncio.sleep(60)  # Check every minute
             expired = [rid for rid, room in self.rooms.items() if room.is_expired()]
             for rid in expired:
+                print(f"[Cleanup] Removing expired room: {rid}")
                 await self.close_room(rid)
     
     def generate_room_id(self) -> str:
@@ -98,6 +126,7 @@ class RelayManager:
             room_secret=room_secret,
             creator_ip=creator_ip
         )
+        print(f"[Room] Created: {room_id} from {creator_ip}")
         return room_id, room_secret
     
     def get_room(self, room_id: str) -> Optional[Room]:
@@ -152,6 +181,7 @@ class RelayManager:
                 except:
                     pass
             room.bridge = participant
+            print(f"[Room {room_id}] Bridge joined")
         elif role == "mobile":
             if room.mobile:
                 # Disconnect existing mobile
@@ -160,6 +190,7 @@ class RelayManager:
                 except:
                     pass
             room.mobile = participant
+            print(f"[Room {room_id}] Mobile joined: {device_name}")
         
         room.touch()
         
@@ -176,8 +207,10 @@ class RelayManager:
         
         if role == "bridge":
             room.bridge = None
+            print(f"[Room {room_id}] Bridge left")
         elif role == "mobile":
             room.mobile = None
+            print(f"[Room {room_id}] Mobile left")
         
         # Notify remaining participant
         await self._notify_pairing_status(room)
@@ -205,6 +238,9 @@ class RelayManager:
                 await room.mobile.websocket.send_text(status_msg)
             except:
                 pass
+        
+        if is_paired:
+            print(f"[Room {room.room_id}] Paired!")
     
     async def relay_message(self, room_id: str, from_role: str, message: str):
         """Relay a message from one participant to the other"""
@@ -234,7 +270,23 @@ manager = RelayManager()
 # REST ENDPOINTS
 # ============================================
 
-@router.post("/relay/create-room")
+@app.get("/")
+async def root():
+    """Health check endpoint"""
+    return {
+        "service": "MetaSynx Relay Server",
+        "status": "running",
+        "active_rooms": len(manager.rooms)
+    }
+
+
+@app.get("/health")
+async def health():
+    """Health check for load balancers"""
+    return {"status": "healthy"}
+
+
+@app.post("/ws/relay/create-room")
 async def create_room(
     request: Request,
     x_api_key: str = Header(..., alias="x-api-key")
@@ -248,7 +300,12 @@ async def create_room(
         raise HTTPException(status_code=401, detail="Invalid API key")
     
     # Get client IP for rate limiting
-    client_ip = request.client.host if request.client else "unknown"
+    # Check for X-Forwarded-For header (behind reverse proxy)
+    forwarded_for = request.headers.get("x-forwarded-for")
+    if forwarded_for:
+        client_ip = forwarded_for.split(",")[0].strip()
+    else:
+        client_ip = request.client.host if request.client else "unknown"
     
     # Check rate limit per IP
     rooms_by_ip = sum(1 for room in manager.rooms.values() 
@@ -265,12 +322,12 @@ async def create_room(
     return {
         "room_id": room_id,
         "room_secret": room_secret,
-        "websocket_url": f"wss://vps2.bk.harmonicmarkets.com:8443/ws/relay/{room_id}",
+        "websocket_url": f"wss://{SERVER_HOST}/ws/relay/{room_id}",
         "expires_in_minutes": ROOM_EXPIRY_MINUTES
     }
 
 
-@router.get("/relay/room/{room_id}/status")
+@app.get("/ws/relay/room/{room_id}/status")
 async def get_room_status(room_id: str, x_api_key: str = Header(..., alias="x-api-key")):
     """Check if a room exists and its status"""
     # Validate API key
@@ -294,7 +351,7 @@ async def get_room_status(room_id: str, x_api_key: str = Header(..., alias="x-ap
 # WEBSOCKET ENDPOINT
 # ============================================
 
-@router.websocket("/relay/{room_id}")
+@app.websocket("/ws/relay/{room_id}")
 async def websocket_relay(websocket: WebSocket, room_id: str):
     """
     WebSocket endpoint for relay communication.
@@ -389,7 +446,52 @@ async def websocket_relay(websocket: WebSocket, room_id: str):
     except WebSocketDisconnect:
         pass
     except Exception as e:
-        print(f"WebSocket error: {e}")
+        print(f"[WebSocket Error] {e}")
     finally:
         if role:
             await manager.leave_room(room_id, role)
+
+
+# ============================================
+# MAIN
+# ============================================
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="MetaSynx Relay Server")
+    parser.add_argument("--host", default="0.0.0.0", help="Host to bind to")
+    parser.add_argument("--port", type=int, default=443, help="Port to bind to")
+    parser.add_argument("--ssl", action="store_true", help="Enable SSL")
+    parser.add_argument("--cert", default="/etc/letsencrypt/live/server1.metasynx.io/fullchain.pem", 
+                        help="SSL certificate file")
+    parser.add_argument("--key", default="/etc/letsencrypt/live/server1.metasynx.io/privkey.pem", 
+                        help="SSL key file")
+    parser.add_argument("--reload", action="store_true", help="Enable auto-reload (dev only)")
+    
+    args = parser.parse_args()
+    
+    print(f"""
+╔══════════════════════════════════════════════════════════════╗
+║              MetaSynx Relay Server v1.0.0                    ║
+╠══════════════════════════════════════════════════════════════╣
+║  Host: {args.host:<54}║
+║  Port: {args.port:<54}║
+║  SSL:  {str(args.ssl):<54}║
+╚══════════════════════════════════════════════════════════════╝
+    """)
+    
+    if args.ssl:
+        uvicorn.run(
+            "websocket_relay:app",
+            host=args.host,
+            port=args.port,
+            ssl_certfile=args.cert,
+            ssl_keyfile=args.key,
+            reload=args.reload
+        )
+    else:
+        uvicorn.run(
+            "websocket_relay:app",
+            host=args.host,
+            port=args.port,
+            reload=args.reload
+        )
