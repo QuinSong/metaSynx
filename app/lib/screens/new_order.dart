@@ -12,6 +12,8 @@ class NewOrderScreen extends StatefulWidget {
   final String? initialSymbol;
   final String? initialOrderType;
   final String? initialLots;
+  final String? initialSL;
+  final String? initialTP;
   final void Function({
     required String symbol,
     required String type,
@@ -35,6 +37,8 @@ class NewOrderScreen extends StatefulWidget {
     this.initialSymbol,
     this.initialOrderType,
     this.initialLots,
+    this.initialSL,
+    this.initialTP,
     required this.onPlaceOrder,
   });
 
@@ -103,6 +107,16 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
     // Set initial symbol if provided, detecting and stripping suffix
     if (widget.initialSymbol != null && widget.initialSymbol!.isNotEmpty) {
       _setSymbolWithSuffixDetection(widget.initialSymbol!);
+    }
+    
+    // Set initial SL if provided
+    if (widget.initialSL != null && widget.initialSL!.isNotEmpty) {
+      _slController.text = widget.initialSL!;
+    }
+    
+    // Set initial TP if provided
+    if (widget.initialTP != null && widget.initialTP!.isNotEmpty) {
+      _tpController.text = widget.initialTP!;
     }
   }
   

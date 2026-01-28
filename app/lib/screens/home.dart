@@ -825,9 +825,37 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           lotRatios: _lotRatios,
           symbolSuffixes: _symbolSuffixes,
           preferredPairs: _preferredPairs,
-          onPlaceOrder: _placeOrder,
+          onOpenNewOrder: _openNewOrderWithValues,
           onRequestSymbolInfo: _requestSymbolInfo,
           symbolInfoStream: _symbolInfoController.stream,
+        ),
+      ),
+    );
+  }
+
+  void _openNewOrderWithValues({
+    required String symbol,
+    required String orderType,
+    required String lots,
+    String? sl,
+    String? tp,
+  }) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => NewOrderScreen(
+          accounts: _accountsNotifier.value,
+          accountNames: _accountNames,
+          mainAccountNum: _mainAccountNum,
+          lotRatios: _lotRatios,
+          preferredPairs: _preferredPairs,
+          symbolSuffixes: _symbolSuffixes,
+          initialSymbol: symbol,
+          initialOrderType: orderType,
+          initialLots: lots,
+          initialSL: sl,
+          initialTP: tp,
+          onPlaceOrder: _placeOrder,
         ),
       ),
     );

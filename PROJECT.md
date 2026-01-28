@@ -6,11 +6,16 @@ MetaSynx is a mobile-first trade management system that allows controlling multi
 
 **Key Features:**
 - Monitor multiple MT4 accounts in real-time
-- Place trades across multiple terminals simultaneously
+- Place market, limit, and stop orders across multiple terminals simultaneously
 - Close/modify positions with live P/L updates
-- TradingView-style charts with position lines (using Lightweight Charts)
+- Partial position close with lot ratio support
+- Risk calculator with broker pip values
+- TradingView-style charts with live MT4 data and position lines
+- Pending order management (cancel/modify)
+- Trade history with filtering
 - Proportional lot sizing across accounts
 - QR code pairing for secure connection
+- Bottom navigation bar for easy screen switching
 
 ---
 
@@ -35,9 +40,11 @@ MetaSynx is a mobile-first trade management system that allows controlling multi
 1. **Mobile ↔ Relay Server ↔ Windows Bridge**: WebSocket messages (JSON)
 2. **Windows Bridge ↔ MT4 EA**: File-based communication in MT4 Common Files folder
    - `status_X.json` - Account info (balance, equity, margin)
-   - `positions_X.json` - Open positions
-   - `command_X.json` - Commands from app (orders, close, modify)
-   - `response_X.json` - Command results
+   - `positions_X.json` - Open positions and pending orders
+   - `command_X.json` - Commands from app (orders, close, modify, cancel)
+   - `response_X.json` - Command results and symbol info
+   - `chart_X.json` - OHLC candle data for charts
+   - `history_X.json` - Trade history
    - `terminal_index.json` - Maps account numbers to terminal indices
 
 ---
@@ -59,11 +66,13 @@ metaSynx/
 │       │   └── scan_button.dart           # Scan button component
 │       ├── screens/
 │       │   ├── screens.dart               # Barrel export file
-│       │   ├── home.dart                  # Main screen - accounts list, totals
-│       │   ├── account.dart               # Account detail - positions list
+│       │   ├── home.dart                  # Main screen - accounts, nav bar
+│       │   ├── account.dart               # Account detail - positions/orders
 │       │   ├── position.dart              # Position detail - close/modify
-│       │   ├── new_order.dart             # Place new orders
-│       │   ├── chart.dart                 # TradingView charts with positions
+│       │   ├── new_order.dart             # Place new orders (market/limit/stop)
+│       │   ├── chart.dart                 # Live MT4 charts with positions
+│       │   ├── history.dart               # Trade history screen
+│       │   ├── risk_calculator.dart       # Position sizing calculator
 │       │   ├── qr_scanner.dart            # QR code scanner for pairing
 │       │   └── settings/
 │       │       ├── settings.dart           # Main settings screen
@@ -76,7 +85,7 @@ metaSynx/
 │       └── utils/
 │           └── formatters.dart            # Number formatting utilities
 │
-├── win/                          # Windows Bridge App (Flutter - Windows)
+├── win_bridge/                   # Windows Bridge App (Flutter - Windows)
 │   ├── windows/                  # Windows platform files
 │   └── lib/
 │       ├── main.dart             # Bridge app entry point
@@ -100,7 +109,7 @@ metaSynx/
 │           ├── relay_connection.dart      # WebSocket to relay
 │           └── room_service.dart          # Room creation API
 │
-├── MetaSynxEA.mq4                # MT4 Expert Advisor (v2.00)
+├── MetaSynxEA.mq4                # MT4 Expert Advisor
 ├── websocket_relay.py            # FastAPI WebSocket relay server
 └── PROJECT.md                    # This documentation file
 ```
@@ -111,46 +120,87 @@ metaSynx/
 
 ### 1. Mobile App (`/app`)
 
-**Main Screen (home.dart)** - 902 lines
-- Shows connection status card with QR scanner button
+**Main Screen (home.dart)** - 1167 lines
+- Bottom navigation bar (Home, Chart, History, Settings)
+- Connection status card with QR scanner button
 - Lists all connected MT4 accounts with balance/equity/P/L
 - Shows total across all accounts
+- Calculator icon for risk calculator
 - FAB button for new orders
-- Settings gear icon
 - Sorts accounts with main account first
+- App lifecycle handling (pauses polling in background)
 
-**Account Detail (account.dart)** - 859 lines
-- Shows single account's positions
-- Expandable position cards (tap left to expand, right to navigate)
+**Account Detail (account.dart)** - 1414 lines
+- Shows single account's positions and pending orders
+- ORDERS section for pending limit/stop orders with cancel/edit buttons
+- POSITIONS section with expandable position cards
 - Filter by symbol (persisted per account)
 - Real-time P/L updates
+- Tap left side of card to expand, right side to navigate
 
-**Position Detail (position.dart)** - 1088 lines
-- Full position information
-- Modify SL/TP with validation
+**Position Detail (position.dart)** - 1379 lines
+- Full position information with gradient header
+- Modify SL/TP with validation against current price
 - Close position with optional confirmation dialog
+- **Partial close** - close portion of position with lot ratio support
 - Navigate to chart
 - Shows commission/swap if enabled
+- P/L percentage display
 
-**New Order (new_order.dart)** - 756 lines
-- Symbol input with suffix toggle
+**New Order (new_order.dart)** - 947 lines
+- Symbol input with toggleable suffix
 - Buy/Sell buttons
+- **Execution mode**: Market, Limit, Stop
+- Price field for pending orders
 - Lot size with +/- controls
 - Optional SL/TP
 - Target: specific account, all accounts, or main account only
 - Preferred symbols quick-select
+- Accepts pre-filled values from risk calculator
 
-**Chart (chart.dart)** - 936 lines
+**Chart (chart.dart)** - 2443 lines
 - Uses TradingView Lightweight Charts via WebView
-- External data feed (currently placeholder - future: MT4 direct feed)
-- Position entry lines (green=buy, red=sell)
-- SL/TP lines (dashed)
+- **Live MT4 data feed** - real candles from broker
+- Position entry lines (green=buy, red=sell) with lot labels
+- Pending order lines (dashed, muted colors)
+- SL/TP lines
+- Bid/Ask price lines (toggleable)
+- Spread display
 - Tap position lines to navigate to position detail
-- Account selector, timeframe selector
-- Quick symbol buttons from open positions
+- Tap pending order lines for edit/cancel popup
+- Account selector, timeframe selector (M1-MN)
+- Symbol search overlay with recent/popular symbols
+- Buy/Sell buttons to open new order screen
+
+**History (history.dart)** - 582 lines
+- Period tabs: Today, Week, Month
+- Account filter dropdown
+- Symbol filter dropdown
+- Trade cards showing entry/exit prices, P/L, lots
+- Commission/swap display if enabled
+
+**Risk Calculator (risk_calculator.dart)** - 1022 lines
+- Account selection with balance display
+- Symbol input with suffix toggle
+- **Search button** fetches live symbol info from MT4
+- Auto-fills entry price with current bid/ask
+- SL/TP hint values based on pip distance
+- Risk mode: Percentage or Fixed Amount
+- Quick risk buttons (0.5%, 1%, 2%, 3%, 5%)
+- Calculates position size based on risk
+- Displays:
+  - Pip value (from broker or estimated)
+  - Position size in lots
+  - Potential loss/profit
+  - SL/TP distance in pips
+  - Risk:Reward ratio with visual bar
+- Opens New Order screen with calculated values
 
 **Settings (settings/)**
-- **settings.dart** (537 lines): Main settings screen with navigation cards
+- **settings.dart** (534 lines): Main settings screen with navigation cards
+  - Include Commission/Swap toggle
+  - Show P/L as % toggle
+  - Confirm Before Close toggle
 - **account_names.dart** (241 lines): Custom display names for accounts
 - **lot_sizing.dart** (444 lines): Set main account + lot ratios
 - **symbol_suffixes.dart** (331 lines): Per-account suffixes (e.g., ".pro", "-VIP")
@@ -160,34 +210,52 @@ metaSynx/
 - **relay_connection.dart** (177 lines): WebSocket connection management
 - **formatters.dart** (17 lines): Number formatting with thousand separators
 
-### 2. Windows Bridge (`/win`)
+### 2. Windows Bridge (`/win_bridge`)
 
 **Purpose**: Bridges WebSocket (relay) to file system (MT4)
 
 **Key Files:**
-- **config.dart** (2 lines): Server URL and API key constants
+- **config.dart**: Server URL and API key constants
 - **theme.dart** (62 lines): App colors and text styles
-- **ea_service.dart** (228 lines): Reads/writes MT4 files, polls for updates
+- **ea_service.dart** (405 lines): Reads/writes MT4 files, polls for updates
 - **relay_connection.dart** (140 lines): WebSocket connection management
 - **room_service.dart** (47 lines): Room creation API
-- **home_screen.dart** (479 lines): QR code display, connection status, activity log
+- **home_screen.dart** (626 lines): QR code display, connection status, activity log
 
 **Message Handling (in home_screen.dart):**
 - `get_accounts` → Reads all `status_X.json` files
-- `get_positions` → Reads `positions_X.json` files
+- `get_positions` → Reads `positions_X.json` files (includes pending orders)
 - `place_order` → Writes to `command_X.json`
-- `close_position` → Writes to `command_X.json`
+- `close_position` → Writes to `command_X.json` (supports partial close)
 - `modify_position` → Writes to `command_X.json`
+- `cancel_order` → Writes to `command_X.json`
+- `modify_pending` → Writes to `command_X.json`
+- `get_chart_data` → Writes to `command_X.json`, reads `chart_X.json`
+- `get_history` → Writes to `command_X.json`, reads `history_X.json`
+- `get_symbol_info` → Writes to `command_X.json`, reads `response_X.json`
 
 ### 3. MT4 Expert Advisor (`MetaSynxEA.mq4`)
 
-**Version**: 2.00 (478 lines)
+**Version**: 2.10 (1052 lines)
 
 **Features:**
 - Multi-terminal support via unique terminal index
 - Writes account status every 500ms
-- Writes positions every 500ms
-- Processes commands: place_order, close_position, modify_position
+- Writes positions and pending orders every 500ms
+- Chart data on request (200 bars history)
+- Trade history on request
+- Symbol info with pip value for risk calculator
+- Auto-adds symbol to Market Watch if needed
+
+**Supported Commands:**
+- `place_order` - Market, limit, and stop orders
+- `close_position` - Full or partial close
+- `modify_position` - Change SL/TP
+- `cancel_order` - Cancel pending order
+- `modify_pending` - Change pending order price
+- `get_chart_data` - Returns OHLC candles
+- `get_history` - Returns closed trades
+- `get_symbol_info` - Returns pip value, lot constraints, current price
 
 **File Locations:**
 All files in: `%APPDATA%\MetaQuotes\Terminal\Common\Files\MetaSynx\`
@@ -195,18 +263,48 @@ All files in: `%APPDATA%\MetaQuotes\Terminal\Common\Files\MetaSynx\`
 **Command Format (command_X.json):**
 ```json
 {"action": "place_order", "symbol": "XAUUSD", "type": "buy", "lots": 0.1, "sl": 0, "tp": 0, "magic": 123456}
+{"action": "place_order", "symbol": "EURUSD", "type": "buy_limit", "lots": 0.1, "price": 1.0850, "sl": 1.0800, "tp": 1.0950}
 {"action": "close_position", "ticket": 12345}
+{"action": "close_position", "ticket": 12345, "lots": 0.05}
 {"action": "modify_position", "ticket": 12345, "sl": 1.2000, "tp": 1.3000}
+{"action": "cancel_order", "ticket": 12345}
+{"action": "modify_pending", "ticket": 12345, "price": 1.0860}
+{"action": "get_chart_data", "symbol": "EURUSD", "timeframe": "H1", "count": 200}
+{"action": "get_history", "period": "week"}
+{"action": "get_symbol_info", "symbol": "EURUSD"}
 ```
+
+**Order Types:**
+- `buy` / `sell` - Market orders
+- `buy_limit` / `sell_limit` - Limit orders
+- `buy_stop` / `sell_stop` - Stop orders
 
 **Modify SL/TP Values:**
 - `-1` = Keep existing value
 - `0` = Remove SL/TP
 - `>0` = Set new value
 
+**Symbol Info Response:**
+```json
+{
+  "type": "symbol_info",
+  "symbol": "EURUSD-VIP",
+  "valid": true,
+  "pipValue": 10.0,
+  "pipSize": 0.0001,
+  "digits": 5,
+  "minLot": 0.01,
+  "maxLot": 100.0,
+  "lotStep": 0.01,
+  "bid": 1.08500,
+  "ask": 1.08520,
+  "spread": 20
+}
+```
+
 ### 4. Relay Server (`websocket_relay.py`)
 
-**FastAPI WebSocket Relay** (395 lines)
+**FastAPI WebSocket Relay** (394 lines)
 
 **Endpoints:**
 - `POST /ws/relay/create-room` - Creates new room, returns room_id + room_secret
@@ -242,13 +340,13 @@ All files in: `%APPDATA%\MetaQuotes\Terminal\Common\Files\MetaSynx\`
   "leverage": 100,
   "openPositions": 3,
   "profit": 250.50,
-  "lastUpdate": "2025.01.25 10:30:00",
+  "lastUpdate": "2025.01.28 10:30:00",
   "connected": true,
   "tradeAllowed": true
 }
 ```
 
-### Position (positions_X.json)
+### Positions (positions_X.json)
 ```json
 {
   "index": 0,
@@ -265,9 +363,62 @@ All files in: `%APPDATA%\MetaQuotes\Terminal\Common\Files\MetaSynx\`
       "profit": 45.00,
       "swap": -1.50,
       "commission": -2.00,
-      "openTime": "2025.01.25 10:30:00",
+      "openTime": "2025.01.28 10:30:00",
       "comment": "",
       "magic": 123456
+    },
+    {
+      "ticket": 12346,
+      "symbol": "EURUSD",
+      "type": "buy_limit",
+      "lots": 0.50,
+      "openPrice": 1.08500,
+      "currentPrice": 1.08650,
+      "sl": 1.08000,
+      "tp": 1.09500,
+      "profit": 0,
+      "swap": 0,
+      "commission": 0,
+      "openTime": "2025.01.28 11:00:00",
+      "comment": "",
+      "magic": 123457
+    }
+  ]
+}
+```
+
+### Chart Data (chart_X.json)
+```json
+{
+  "index": 0,
+  "symbol": "EURUSD",
+  "timeframe": "H1",
+  "bid": 1.08500,
+  "ask": 1.08520,
+  "candles": [
+    {"time": 1706428800, "open": 1.0845, "high": 1.0860, "low": 1.0840, "close": 1.0855},
+    ...
+  ]
+}
+```
+
+### History (history_X.json)
+```json
+{
+  "index": 0,
+  "trades": [
+    {
+      "ticket": 12340,
+      "symbol": "XAUUSD",
+      "type": "buy",
+      "lots": 0.10,
+      "openPrice": 2640.00,
+      "closePrice": 2660.00,
+      "openTime": "2025.01.27 09:00:00",
+      "closeTime": "2025.01.27 15:30:00",
+      "profit": 200.00,
+      "swap": -1.50,
+      "commission": -2.00
     }
   ]
 }
@@ -289,6 +440,13 @@ All files in: `%APPDATA%\MetaQuotes\Terminal\Common\Files\MetaSynx\`
 | `confirm_before_close` | bool | Show confirmation dialog before closing |
 | `last_connection` | JSON | Last successful connection config for auto-reconnect |
 | `pair_filter_X` | String | Last selected symbol filter for account X |
+| `chart_account` | String | Last selected account for chart |
+| `chart_symbol` | String | Last selected symbol for chart |
+| `chart_timeframe` | String | Last selected timeframe for chart |
+| `chart_show_ba` | bool | Show bid/ask lines on chart |
+| `calc_symbol` | String | Last symbol used in risk calculator |
+| `calc_risk_percent` | String | Last risk % used in calculator |
+| `last_lots` | String | Last lot size used in new order |
 
 ---
 
@@ -316,6 +474,7 @@ border: #2a2a2a
 - Symbols include broker suffixes (e.g., "XAUUSD-VIP", "EURUSD.pro")
 - Symbol suffixes can be configured per account in settings
 - When placing orders, suffix is applied based on target account
+- Risk calculator adds suffix when fetching symbol info
 
 ### Lot Sizing Logic
 When "All Accounts" selected:
@@ -323,25 +482,43 @@ When "All Accounts" selected:
 2. Other accounts get: `enteredLots * accountRatio`
 3. If no ratio set, account uses 1.0 ratio
 
-### Position Matching
-- Positions matched by exact symbol (case-insensitive)
-- Terminal index used to identify which MT4 terminal
+### Partial Close Logic
+1. User enters lots to close in position detail
+2. For main account: uses entered lots directly
+3. For other accounts: `lotsToClose = enteredLots * lotRatio`
+4. Validates lots don't exceed position size
+5. EA normalizes to lot step and ensures remaining position >= minLot
+
+### Risk Calculator Flow
+1. User selects account and enters symbol
+2. Taps "Search" to fetch symbol info from MT4
+3. EA adds symbol to Market Watch if needed (with retry)
+4. Returns pip value, lot constraints, current price
+5. Calculator uses broker pip value (or estimate if unavailable)
+6. Calculates: `lotSize = riskAmount / (slPips × pipValue)`
+7. Tapping BUY/SELL opens New Order with pre-filled values
+
+### Pending Order Types
+| Type | Description | Execution |
+|------|-------------|-----------|
+| buy_limit | Buy below current price | When price drops to order price |
+| sell_limit | Sell above current price | When price rises to order price |
+| buy_stop | Buy above current price | When price rises to order price |
+| sell_stop | Sell below current price | When price drops to order price |
+
+### Chart Data
+- Data fetched directly from MT4 broker
+- 200 bars history on load
+- Polling every 1 second for updates
+- Bid/Ask prices included for spread calculation
+- Position lines update in real-time
 
 ### Error Handling
-- Commands have 2-second timeout waiting for EA processing
+- Commands have timeout waiting for EA processing
 - Stale status files (>10 seconds old) are ignored
 - WebSocket auto-reconnects on disconnect
-
----
-
-## Future Enhancements (Planned)
-
-1. **MT4 Direct Chart Data** - Get candle data directly from MT4 for exact broker prices
-2. **Partial close** - Close portion of position
-3. **Pending orders** - Limit/stop orders
-4. **Trade history** - View closed trades
-5. **Push notifications** - Alerts for SL/TP hits
-6. **Risk calculator** - Position sizing based on risk %
+- Symbol not found returns error from EA
+- Invalid positions/orders handled gracefully
 
 ---
 
@@ -352,18 +529,26 @@ When "All Accounts" selected:
 |--------|-------------|
 | `ping` | Heartbeat |
 | `get_accounts` | Request account list |
-| `get_positions` | Request positions (optional targetIndex) |
-| `place_order` | Place new order |
-| `close_position` | Close position by ticket |
+| `get_positions` | Request positions and pending orders |
+| `place_order` | Place market, limit, or stop order |
+| `close_position` | Close position (full or partial) |
 | `modify_position` | Modify SL/TP |
+| `cancel_order` | Cancel pending order |
+| `modify_pending` | Modify pending order price |
+| `get_chart_data` | Request candle data |
+| `get_history` | Request trade history |
+| `get_symbol_info` | Request symbol info for calculator |
 
 ### Bridge → Mobile
 | Action | Description |
 |--------|-------------|
 | `pong` | Heartbeat response |
 | `accounts_list` | Account data array |
-| `positions_list` | Positions array |
+| `positions_list` | Positions and pending orders array |
 | `order_result` | Order execution result |
+| `chart_data` | OHLC candle data with bid/ask |
+| `history_data` | Trade history array |
+| `symbol_info` | Symbol info for calculator |
 
 ---
 
@@ -378,7 +563,7 @@ flutter run
 
 ### Windows Bridge
 ```bash
-cd win
+cd win_bridge
 flutter pub get
 flutter run -d windows
 ```
@@ -400,6 +585,19 @@ uvicorn main:app --host 0.0.0.0 --port 8443 --ssl-keyfile key.pem --ssl-certfile
 
 ---
 
-*Last Updated: January 25, 2026*
-*EA Version: 2.00*
-*Total Lines of Code: ~8,755 (Dart) + 478 (MQL4) + 395 (Python)*
+## Line Count Summary
+
+| Component | Lines |
+|-----------|-------|
+| **Mobile App (Dart)** | |
+| - Screens | 11,107 |
+| - Core/Services/Components/Utils | 612 |
+| **Windows Bridge (Dart)** | 1,221 |
+| **MT4 EA (MQL4)** | 1,052 |
+| **Relay Server (Python)** | 394 |
+| **Total** | ~14,386 |
+
+---
+
+*Last Updated: January 28, 2026*
+*EA Version: 2.10*

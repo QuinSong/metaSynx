@@ -4,3 +4,24 @@ cd metaSynx/win
 flutter run -d windows
 
 rm -r -fo metaSynx; git clone git@github.com:QuinSong/metaSynx.git; cd metaSynx/win; flutter run -d windows
+
+
+In Google Cloud Console:
+VPC Network → Firewall rules
+Allow TCP 80 and 443
+
+sudo apt update
+sudo apt install -y python3-pip
+sudo apt install -y tmux
+sudo apt install -y python3-certbot-dns-cloudflare
+
+sudo mkdir -p /root/.secrets
+sudo nano /root/.secrets/cloudflare.ini
+dns_cloudflare_api_token = qBeiXSVVebw7VT6rOHB_KOGeZIQONkoe0d-ntfaK
+sudo chmod 600 /root/.secrets/cloudflare.ini
+
+sudo certbot certonly \
+  --dns-cloudflare \
+  --dns-cloudflare-credentials /root/.secrets/cloudflare.ini \
+  --dns-cloudflare-propagation-seconds 60 \
+  -d server1.metasynx.io

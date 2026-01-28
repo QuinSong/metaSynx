@@ -947,21 +947,71 @@ string GetOrderTypeString(int type)
 //+------------------------------------------------------------------+
 void WriteSymbolInfo(string symbol)
 {
-   // Ensure symbol is in Market Watch
+   // Try to add symbol to Market Watch if not already there
    SymbolSelect(symbol, true);
    
-   // Get symbol info
+   // Wait for symbol data to become available (retry up to 10 times)
+   double bid = 0;
+   double ask = 0;
+   double point = 0;
+   int retries = 0;
+   int maxRetries = 10;
+   
+   while(retries < maxRetries)
+   {
+      Sleep(100); // Wait 100ms between attempts
+      
+      bid = MarketInfo(symbol, MODE_BID);
+      ask = MarketInfo(symbol, MODE_ASK);
+      point = MarketInfo(symbol, MODE_POINT);
+      
+      // If we have valid data, break out
+      if((bid > 0 || ask > 0) && point > 0)
+      {
+         break;
+      }
+      
+      retries++;
+   }
+   
    double tickValue = MarketInfo(symbol, MODE_TICKVALUE);
    double tickSize = MarketInfo(symbol, MODE_TICKSIZE);
-   double point = MarketInfo(symbol, MODE_POINT);
    int digits = (int)MarketInfo(symbol, MODE_DIGITS);
    double lotStep = MarketInfo(symbol, MODE_LOTSTEP);
    double minLot = MarketInfo(symbol, MODE_MINLOT);
    double maxLot = MarketInfo(symbol, MODE_MAXLOT);
    double contractSize = MarketInfo(symbol, MODE_LOTSIZE);
-   double bid = MarketInfo(symbol, MODE_BID);
-   double ask = MarketInfo(symbol, MODE_ASK);
    double spread = MarketInfo(symbol, MODE_SPREAD);
+   
+   // Check if symbol is valid - if bid/ask are 0, symbol doesn't exist
+   bool symbolValid = (bid > 0 || ask > 0) && point > 0;
+   
+   string json = "{";
+   json += "\"type\":\"symbol_info\",";
+   json += "\"symbol\":\"" + symbol + "\",";
+   
+   if(!symbolValid)
+   {
+      // Symbol not found
+      json += "\"error\":\"Symbol not found\",";
+      json += "\"valid\":false";
+      json += "}";
+      
+      int handle = FileOpen(g_responseFile, FILE_WRITE|FILE_TXT|FILE_COMMON);
+      if(handle != INVALID_HANDLE)
+      {
+         FileWriteString(handle, json);
+         FileClose(handle);
+         Print("Symbol not found: ", symbol, " (after ", retries, " retries)");
+      }
+      return;
+   }
+   
+   // Log if we needed retries
+   if(retries > 0)
+   {
+      Print("Symbol ", symbol, " data loaded after ", retries, " retries");
+   }
    
    // Calculate pip value per standard lot (1.0 lot)
    // Pip value = (tick value / tick size) * pip size
@@ -973,9 +1023,7 @@ void WriteSymbolInfo(string symbol)
    }
    
    // Build JSON response
-   string json = "{";
-   json += "\"type\":\"symbol_info\",";
-   json += "\"symbol\":\"" + symbol + "\",";
+   json += "\"valid\":true,";
    json += "\"tickValue\":" + DoubleToString(tickValue, 6) + ",";
    json += "\"tickSize\":" + DoubleToString(tickSize, 8) + ",";
    json += "\"pipValue\":" + DoubleToString(pipValue, 4) + ",";
@@ -992,7 +1040,7 @@ void WriteSymbolInfo(string symbol)
    json += "}";
    
    // Write to response file
-   int handle = FileOpen(RESPONSE_FILE, FILE_WRITE|FILE_TXT|FILE_ANSI);
+   int handle = FileOpen(g_responseFile, FILE_WRITE|FILE_TXT|FILE_COMMON);
    if(handle != INVALID_HANDLE)
    {
       FileWriteString(handle, json);
