@@ -7,6 +7,7 @@ class ConnectionCard extends StatelessWidget {
   final bool bridgeConnected;
   final String? roomId;
   final VoidCallback onDisconnect;
+  final bool isReconnecting;
 
   const ConnectionCard({
     super.key,
@@ -14,6 +15,7 @@ class ConnectionCard extends StatelessWidget {
     required this.bridgeConnected,
     required this.roomId,
     required this.onDisconnect,
+    this.isReconnecting = false,
   });
 
   void _showDisconnectDialog(BuildContext context) {
@@ -55,6 +57,11 @@ class ConnectionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // If reconnecting (has cached data), always show the connected-style card with orange icon
+    if (isReconnecting) {
+      return _buildReconnectingCard(context);
+    }
+    
     if (connectionState == relay.ConnectionState.connected && bridgeConnected) {
       return _buildConnectedCard(context);
     }
@@ -98,6 +105,45 @@ class ConnectionCard extends StatelessWidget {
           const SizedBox(width: 16),
           const Expanded(
             child: Text('VPS Connected', style: AppTextStyles.title),
+          ),
+          IconButton(
+            onPressed: () => _showDisconnectDialog(context),
+            icon: const Icon(Icons.link_off, color: AppColors.textSecondary),
+            tooltip: 'Disconnect',
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildReconnectingCard(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            AppColors.warning.withOpacity(0.15),
+            AppColors.warning.withOpacity(0.05),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.warning.withOpacity(0.3)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppColors.warning.withOpacity(0.2),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Icon(Icons.link, color: AppColors.warning, size: 24),
+          ),
+          const SizedBox(width: 16),
+          const Expanded(
+            child: Text('Reconnecting...', style: AppTextStyles.title),
           ),
           IconButton(
             onPressed: () => _showDisconnectDialog(context),

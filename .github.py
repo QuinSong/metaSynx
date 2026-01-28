@@ -2,7 +2,7 @@ import os
 import time
 
 
-msg = 'gcloud relay complete via server1.metasynx.io'
+msg = 'fixed app in background loading'
 
 
 os.system('git add .')

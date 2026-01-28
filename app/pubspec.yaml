@@ -10,6 +10,7 @@ dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: ^1.0.8
+  font_awesome_flutter: ^10.6.0
   mobile_scanner: ^4.0.0
   intl: ^0.18.0
   shared_preferences: ^2.2.0

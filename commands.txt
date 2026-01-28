@@ -21,3 +21,9 @@ sudo certbot certonly \
   --dns-cloudflare-credentials /root/.secrets/cloudflare.ini \
   --dns-cloudflare-propagation-seconds 60 \
   -d server1.metasynx.io
+
+
+34.147.82.105
+scp server/websocket_relay.py quinsong@34.147.82.105:/tmp/
+ssh quinsong@34.147.82.105 "sudo mv /tmp/websocket_relay.py /opt/metasynx/ && sudo systemctl restart metasynx-relay"
+curl https://server1.metasynx.io/health

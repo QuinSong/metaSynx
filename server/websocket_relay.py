@@ -29,7 +29,7 @@ from datetime import datetime, timedelta
 # ============================================
 
 API_KEY = "msxkey2026"              # API key for authentication
-ROOM_EXPIRY_MINUTES = 30            # Room expires if no activity
+ROOM_EXPIRY_MINUTES = 1440          # Room expires after 24 hours of NO activity (bridge disconnected)
 ROOM_CODE_LENGTH = 8                # Length of room codes
 ROOM_SECRET_LENGTH = 16             # Length of room secrets
 MAX_ROOMS_PER_IP = 10               # Prevent abuse

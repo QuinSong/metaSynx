@@ -605,8 +605,8 @@ sudo certbot certonly --standalone -d YOUR_DOMAIN
 ### Step 2: Copy Files to Server
 From your local machine:
 ```bash
-scp server/websocket_relay.py quinsong@34.147.82.105:/tmp/
-scp server/metasynx-relay.service quinsong@34.147.82.105:/tmp/
+scp server/websocket_relay.py USERNAME@YOUR_DOMAIN:/tmp/
+scp server/metasynx-relay.service USERNAME@YOUR_DOMAIN:/tmp/
 ```
 
 ### Step 3: SSH and Install

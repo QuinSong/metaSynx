@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import '../core/theme.dart';
 import '../services/relay_connection.dart' as relay;
 import '../components/connection_card.dart';
@@ -61,11 +62,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
-    
+
     switch (state) {
       case AppLifecycleState.resumed:
-        // App came to foreground - resume polling
+        // App came to foreground - resume immediately
         _isAppInForeground = true;
+        // Force immediate reconnect if we have a saved connection
+        _connection.reconnectNow();
         if (_bridgeConnected) {
           _startRefreshTimer();
         }
@@ -83,48 +86,48 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
-    
+
     // Load account names
     final namesJson = prefs.getString('account_names');
     if (namesJson != null) {
       _accountNames = Map<String, String>.from(jsonDecode(namesJson));
     }
-    
+
     // Load main account
     final mainAccount = prefs.getString('main_account');
     if (mainAccount != null && mainAccount.isNotEmpty) {
       _mainAccountNum = mainAccount;
     }
-    
+
     // Load lot ratios
     final ratiosJson = prefs.getString('lot_ratios');
     if (ratiosJson != null) {
       final decoded = jsonDecode(ratiosJson) as Map<String, dynamic>;
       _lotRatios = decoded.map((k, v) => MapEntry(k, (v as num).toDouble()));
     }
-    
+
     // Load symbol suffixes
     final suffixesJson = prefs.getString('symbol_suffixes');
     if (suffixesJson != null) {
       _symbolSuffixes = Map<String, String>.from(jsonDecode(suffixesJson));
     }
-    
+
     // Load preferred pairs
     final pairsJson = prefs.getString('preferred_pairs');
     if (pairsJson != null) {
       final List<dynamic> decoded = jsonDecode(pairsJson);
       _preferredPairs = decoded.map((e) => e.toString()).toSet();
     }
-    
+
     // Load include commission/swap setting
     _includeCommissionSwap = prefs.getBool('include_commission_swap') ?? false;
-    
+
     // Load show P/L % setting
     _showPLPercent = prefs.getBool('show_pl_percent') ?? false;
-    
+
     // Load confirm before close setting (default true)
     _confirmBeforeClose = prefs.getBool('confirm_before_close') ?? true;
-    
+
     setState(() {});
   }
 
@@ -134,7 +137,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     await prefs.setString('main_account', _mainAccountNum ?? '');
     await prefs.setString('lot_ratios', jsonEncode(_lotRatios));
     await prefs.setString('symbol_suffixes', jsonEncode(_symbolSuffixes));
-    await prefs.setString('preferred_pairs', jsonEncode(_preferredPairs.toList()));
+    await prefs.setString(
+      'preferred_pairs',
+      jsonEncode(_preferredPairs.toList()),
+    );
     await prefs.setBool('include_commission_swap', _includeCommissionSwap);
     await prefs.setBool('show_pl_percent', _showPLPercent);
     await prefs.setBool('confirm_before_close', _confirmBeforeClose);
@@ -173,6 +179,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _startAccountsRefresh();
       } else {
         _stopAccountsRefresh();
+        // Check if connection config was cleared (room expired)
+        if (_connection.connectionConfig == null && _roomId != null) {
+          _handleRoomExpired();
+        }
       }
     };
     _connection.onPairingStatusChanged = (bridgeConnected) {
@@ -184,10 +194,22 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _connection.onMessage = _handleMessage;
   }
 
+  Future<void> _handleRoomExpired() async {
+    // Clear saved connection
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('last_connection');
+    setState(() {
+      _roomId = null;
+      _accountsNotifier.value = [];
+      _positionsNotifier.value = [];
+    });
+    _showError('Connection expired. Please scan QR code again.');
+  }
+
   void _startAccountsRefresh() {
     // Don't start if app is in background
     if (!_isAppInForeground) return;
-    
+
     _refreshTimer?.cancel();
     _refreshTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (_bridgeConnected && _isAppInForeground) {
@@ -196,7 +218,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
     });
   }
-  
+
   void _startRefreshTimer() {
     _startAccountsRefresh();
   }
@@ -205,7 +227,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _refreshTimer?.cancel();
     _refreshTimer = null;
   }
-  
+
   void _stopRefreshTimer() {
     _stopAccountsRefresh();
   }
@@ -219,9 +241,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         setState(() {
           _roomId = config['room'];
         });
-        await _connection.connect(config);
+        await _connection.restoreConnection(config);
       } catch (e) {
         debugPrint('Auto-connect failed: $e');
+        // Don't clear config - let it keep trying
       }
     }
   }
@@ -269,13 +292,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         if (positions != null) {
           if (targetIndex != null) {
             // Merge: replace positions for this terminal only, keep others
-            final currentPositions = List<Map<String, dynamic>>.from(_positionsNotifier.value);
-            currentPositions.removeWhere((p) => p['terminalIndex'] == targetIndex);
+            final currentPositions = List<Map<String, dynamic>>.from(
+              _positionsNotifier.value,
+            );
+            currentPositions.removeWhere(
+              (p) => p['terminalIndex'] == targetIndex,
+            );
             currentPositions.addAll(List<Map<String, dynamic>>.from(positions));
             _positionsNotifier.value = currentPositions;
           } else {
             // Full replacement when getting all positions
-            _positionsNotifier.value = List<Map<String, dynamic>>.from(positions);
+            _positionsNotifier.value = List<Map<String, dynamic>>.from(
+              positions,
+            );
           }
         }
         break;
@@ -321,9 +350,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   void _requestAllPositions() {
-    _connection.send({
-      'action': 'get_positions',
-    });
+    _connection.send({'action': 'get_positions'});
   }
 
   void _closePosition(int ticket, int terminalIndex, [double? lots]) {
@@ -452,10 +479,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     // Generate unique magic number for this order batch
     // Using timestamp to ensure uniqueness across orders
     final magic = DateTime.now().millisecondsSinceEpoch % 2147483647;
-    
+
     for (final index in accountIndices) {
       double adjustedLots = lots;
-      
+
       if (useRatios) {
         // Find account number for this index to get lot ratio
         final account = _accountsNotifier.value.firstWhere(
@@ -466,7 +493,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         final ratio = _getLotRatio(accountNum);
         adjustedLots = double.parse((lots * ratio).toStringAsFixed(2));
       }
-      
+
       // Get account for symbol suffix (only if applySuffix is true)
       String finalSymbol = symbol;
       if (applySuffix) {
@@ -477,7 +504,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         final accountNum = account['account'] as String? ?? '';
         finalSymbol = _getSymbolWithSuffix(symbol, accountNum);
       }
-      
+
       _connection.send({
         'action': 'place_order',
         'symbol': finalSymbol,
@@ -508,19 +535,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   void _showError(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.red.shade700,
-      ),
+      SnackBar(content: Text(message), backgroundColor: Colors.red.shade700),
     );
   }
 
   void _showSuccess(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: AppColors.primary,
-      ),
+      SnackBar(content: Text(message), backgroundColor: AppColors.primary),
     );
   }
 
@@ -539,14 +560,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    final isConnected = _connectionState == relay.ConnectionState.connected &&
+    final isFullyConnected =
+        _connectionState == relay.ConnectionState.connected &&
         _bridgeConnected &&
         _accountsNotifier.value.isNotEmpty;
 
+    // Show accounts view if connected OR if we have cached accounts (reconnecting)
+    final showAccountsView =
+        isFullyConnected || _accountsNotifier.value.isNotEmpty;
+
     return Scaffold(
-      body: SafeArea(
-        child: isConnected ? _buildCurrentScreen() : _buildHomeContent(),
-      ),
+      body: showAccountsView
+          ? SafeArea(child: _buildCurrentScreen())
+          : _buildDisconnectedContent(), // Handle SafeArea internally
       bottomNavigationBar: _buildBottomNavBar(),
     );
   }
@@ -646,6 +672,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Widget _buildHomeContent() {
+    final isFullyConnected =
+        _connectionState == relay.ConnectionState.connected && _bridgeConnected;
+    final isReconnecting =
+        _accountsNotifier.value.isNotEmpty && !isFullyConnected;
+
     return Padding(
       padding: const EdgeInsets.all(24),
       child: Column(
@@ -658,63 +689,108 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             bridgeConnected: _bridgeConnected,
             roomId: _roomId,
             onDisconnect: _disconnect,
+            isReconnecting: isReconnecting,
           ),
           const SizedBox(height: 24),
-          if (_connectionState == relay.ConnectionState.connected &&
-              _bridgeConnected) ...[
-            Text(
-              'ACCOUNTS (${_accountsNotifier.value.length})',
-              style: AppTextStyles.label,
+          Text(
+            'ACCOUNTS (${_accountsNotifier.value.length})',
+            style: AppTextStyles.label,
+          ),
+          const SizedBox(height: 12),
+          Expanded(
+            child: ValueListenableBuilder<List<Map<String, dynamic>>>(
+              valueListenable: _accountsNotifier,
+              builder: (context, accounts, _) {
+                return ValueListenableBuilder<List<Map<String, dynamic>>>(
+                  valueListenable: _positionsNotifier,
+                  builder: (context, positions, _) {
+                    // Sort accounts with main account first
+                    final sortedAccounts = List<Map<String, dynamic>>.from(
+                      accounts,
+                    );
+                    sortedAccounts.sort((a, b) {
+                      final aIsMain = a['account'] == _mainAccountNum;
+                      final bIsMain = b['account'] == _mainAccountNum;
+                      if (aIsMain && !bIsMain) return -1;
+                      if (!aIsMain && bIsMain) return 1;
+                      return (a['index'] as int? ?? 0).compareTo(
+                        b['index'] as int? ?? 0,
+                      );
+                    });
+                    return ListView(
+                      children: [
+                        // Show totals section if more than 1 account
+                        if (sortedAccounts.length > 1)
+                          _buildTotalsSection(sortedAccounts, positions),
+                        // Account cards
+                        ...sortedAccounts.map(
+                          (account) => _buildAccountCard(account),
+                        ),
+                      ],
+                    );
+                  },
+                );
+              },
             ),
-            const SizedBox(height: 12),
-            Expanded(
-              child: _accountsNotifier.value.isEmpty
-                  ? _buildLoadingAccounts()
-                  : ValueListenableBuilder<List<Map<String, dynamic>>>(
-                      valueListenable: _accountsNotifier,
-                      builder: (context, accounts, _) {
-                        return ValueListenableBuilder<List<Map<String, dynamic>>>(
-                          valueListenable: _positionsNotifier,
-                          builder: (context, positions, _) {
-                            // Sort accounts with main account first
-                            final sortedAccounts = List<Map<String, dynamic>>.from(accounts);
-                            sortedAccounts.sort((a, b) {
-                              final aIsMain = a['account'] == _mainAccountNum;
-                              final bIsMain = b['account'] == _mainAccountNum;
-                              if (aIsMain && !bIsMain) return -1;
-                              if (!aIsMain && bIsMain) return 1;
-                              return (a['index'] as int? ?? 0).compareTo(b['index'] as int? ?? 0);
-                            });
-                            return ListView(
-                              children: [
-                                // Show totals section if more than 1 account
-                                if (sortedAccounts.length > 1)
-                                  _buildTotalsSection(sortedAccounts, positions),
-                                // Account cards
-                                ...sortedAccounts.map((account) => _buildAccountCard(account)),
-                              ],
-                            );
-                          },
-                        );
-                      },
-                    ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDisconnectedContent() {
+    // When not connected and no cached accounts
+    final bottomPadding = MediaQuery.of(context).padding.bottom;
+
+    return SafeArea(
+      bottom: false, // We'll handle bottom separately for the button
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                _buildHeader(),
+                const SizedBox(height: 10),
+                ConnectionCard(
+                  connectionState: _connectionState,
+                  bridgeConnected: _bridgeConnected,
+                  roomId: _roomId,
+                  onDisconnect: _disconnect,
+                ),
+                // Show loading accounts if connected to bridge but no accounts yet
+                if (_connectionState == relay.ConnectionState.connected &&
+                    _bridgeConnected &&
+                    _accountsNotifier.value.isEmpty) ...[
+                  const SizedBox(height: 24),
+                  _buildLoadingAccounts(),
+                ],
+              ],
             ),
-          ] else
-            const Spacer(),
+          ),
+          const Spacer(),
           if (_connectionState == relay.ConnectionState.disconnected)
-            ScanButton(onPressed: _openScanner),
+            Padding(
+              padding: EdgeInsets.fromLTRB(24, 24, 24, 24 + bottomPadding),
+              child: ScanButton(onPressed: _openScanner),
+            ),
         ],
       ),
     );
   }
 
   Widget _buildBottomNavBar() {
-    final isConnected = _connectionState == relay.ConnectionState.connected &&
-        _bridgeConnected &&
+    // Show nav bar if connected OR if we have cached accounts (reconnecting)
+    final showNavBar =
+        (_connectionState == relay.ConnectionState.connected &&
+            _bridgeConnected &&
+            _accountsNotifier.value.isNotEmpty) ||
         _accountsNotifier.value.isNotEmpty;
-    
-    if (!isConnected) return const SizedBox.shrink();
-    
+
+    if (!showNavBar) return const SizedBox.shrink();
+
     return _buildNavBarContent(_selectedNavIndex, (index) {
       setState(() {
         _selectedNavIndex = index;
@@ -737,9 +813,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return Container(
       decoration: const BoxDecoration(
         color: AppColors.surface,
-        border: Border(
-          top: BorderSide(color: AppColors.border, width: 1),
-        ),
+        border: Border(top: BorderSide(color: AppColors.border, width: 1)),
       ),
       child: SafeArea(
         top: false,
@@ -748,10 +822,34 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
-              _buildNavItemWithCallback(Icons.home, 'Home', 0, selectedIndex, onTap),
-              _buildNavItemWithCallback(Icons.candlestick_chart, 'Chart', 1, selectedIndex, onTap),
-              _buildNavItemWithCallback(Icons.history, 'History', 2, selectedIndex, onTap),
-              _buildNavItemWithCallback(Icons.settings, 'Settings', 3, selectedIndex, onTap),
+              _buildNavItemWithCallback(
+                Icons.home,
+                'Home',
+                0,
+                selectedIndex,
+                onTap,
+              ),
+              _buildNavItemWithCallback(
+                Icons.candlestick_chart,
+                'Chart',
+                1,
+                selectedIndex,
+                onTap,
+              ),
+              _buildNavItemWithCallback(
+                Icons.history,
+                'History',
+                2,
+                selectedIndex,
+                onTap,
+              ),
+              _buildNavItemWithCallback(
+                Icons.settings,
+                'Settings',
+                3,
+                selectedIndex,
+                onTap,
+              ),
             ],
           ),
         ),
@@ -759,7 +857,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
-  Widget _buildNavItemWithCallback(IconData icon, String label, int index, int selectedIndex, void Function(int) onTap) {
+  Widget _buildNavItemWithCallback(
+    IconData icon,
+    String label,
+    int index,
+    int selectedIndex,
+    void Function(int) onTap,
+  ) {
     final isSelected = selectedIndex == index;
     return GestureDetector(
       onTap: () => onTap(index),
@@ -790,22 +894,33 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Widget _buildHeader() {
-    final showButtons = _connectionState == relay.ConnectionState.connected &&
-        _bridgeConnected &&
+    // Show buttons if connected OR if we have cached accounts (reconnecting)
+    final showButtons =
+        (_connectionState == relay.ConnectionState.connected &&
+            _bridgeConnected &&
+            _accountsNotifier.value.isNotEmpty) ||
         _accountsNotifier.value.isNotEmpty;
-    
+
     return Row(
       children: [
         const Text('METASYNX', style: AppTextStyles.heading),
         const Spacer(),
         if (showButtons) ...[
           IconButton(
-            icon: const Icon(Icons.calculate_outlined, color: AppColors.primary, size: 26),
+            icon: const Icon(
+              Icons.calculate_outlined,
+              color: AppColors.primary,
+              size: 26,
+            ),
             onPressed: _openRiskCalculator,
             tooltip: 'Risk Calculator',
           ),
           IconButton(
-            icon: const Icon(Icons.add_circle, color: AppColors.primary, size: 28),
+            icon: const FaIcon(
+              FontAwesomeIcons.squarePlus,
+              color: AppColors.primary,
+              size: 24,
+            ),
             onPressed: _openNewOrder,
             tooltip: 'New Order',
           ),
@@ -874,18 +989,23 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
-  Widget _buildTotalsSection(List<Map<String, dynamic>> accounts, List<Map<String, dynamic>> positions) {
+  Widget _buildTotalsSection(
+    List<Map<String, dynamic>> accounts,
+    List<Map<String, dynamic>> positions,
+  ) {
     double totalBalance = 0;
     double totalEquity = 0;
     double totalProfit = 0;
-    
+
     for (final account in accounts) {
       totalBalance += (account['balance'] as num?)?.toDouble() ?? 0;
       totalEquity += (account['equity'] as num?)?.toDouble() ?? 0;
-      
+
       final accountIndex = account['index'] as int? ?? -1;
-      final accountPositions = positions.where((p) => p['terminalIndex'] == accountIndex);
-      
+      final accountPositions = positions.where(
+        (p) => p['terminalIndex'] == accountIndex,
+      );
+
       for (final pos in accountPositions) {
         final rawProfit = (pos['profit'] as num?)?.toDouble() ?? 0;
         if (_includeCommissionSwap) {
@@ -932,11 +1052,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Balance', style: TextStyle(color: AppColors.textSecondary, fontSize: 11)),
+                    const Text(
+                      'Balance',
+                      style: TextStyle(
+                        color: AppColors.textSecondary,
+                        fontSize: 11,
+                      ),
+                    ),
                     const SizedBox(height: 2),
                     Text(
                       Formatters.formatCurrency(totalBalance),
-                      style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ],
                 ),
@@ -945,11 +1075,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Equity', style: TextStyle(color: AppColors.textSecondary, fontSize: 11)),
+                    const Text(
+                      'Equity',
+                      style: TextStyle(
+                        color: AppColors.textSecondary,
+                        fontSize: 11,
+                      ),
+                    ),
                     const SizedBox(height: 2),
                     Text(
                       Formatters.formatCurrency(totalEquity),
-                      style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ],
                 ),
@@ -962,16 +1102,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       children: [
                         Text(
                           _includeCommissionSwap ? 'Net P/L' : 'P/L',
-                          style: const TextStyle(color: AppColors.textSecondary, fontSize: 11),
+                          style: const TextStyle(
+                            color: AppColors.textSecondary,
+                            fontSize: 11,
+                          ),
                         ),
                         if (_showPLPercent && totalBalance > 0) ...[
                           const SizedBox(width: 8),
                           Text(
                             '${((totalProfit / totalBalance) * 100).toStringAsFixed(2)}%',
                             style: TextStyle(
-                              color: totalProfit == 0 
-                                  ? Colors.white 
-                                  : (totalProfit > 0 ? AppColors.primary : AppColors.error),
+                              color: totalProfit == 0
+                                  ? Colors.white
+                                  : (totalProfit > 0
+                                        ? AppColors.primary
+                                        : AppColors.error),
                               fontSize: 11,
                             ),
                           ),
@@ -982,7 +1127,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     Text(
                       Formatters.formatCurrencyWithSign(totalProfit),
                       style: TextStyle(
-                        color: totalProfit >= 0 ? AppColors.primary : AppColors.error,
+                        color: totalProfit >= 0
+                            ? AppColors.primary
+                            : AppColors.error,
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
                       ),
@@ -1006,12 +1153,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final displayName = getAccountDisplayName(account);
     final hasCustomName = _accountNames[accountNum]?.isNotEmpty == true;
     final isMainAccount = _mainAccountNum == accountNum;
-    
+
     // Calculate P/L from positions based on setting
-    final accountPositions = _positionsNotifier.value.where(
-      (p) => p['terminalIndex'] == accountIndex
-    ).toList();
-    
+    final accountPositions = _positionsNotifier.value
+        .where((p) => p['terminalIndex'] == accountIndex)
+        .toList();
+
     double profit = 0;
     for (final pos in accountPositions) {
       final rawProfit = (pos['profit'] as num?)?.toDouble() ?? 0;
@@ -1060,7 +1207,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           if (isMainAccount) ...[
                             const SizedBox(width: 8),
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 2,
+                              ),
                               decoration: BoxDecoration(
                                 color: AppColors.primary,
                                 borderRadius: BorderRadius.circular(4),
@@ -1099,14 +1249,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             // Balance, Equity, P/L row
             Row(
               children: [
+                Expanded(child: _buildStatColumn('Balance', balance, currency)),
+                Expanded(child: _buildStatColumn('Equity', equity, currency)),
                 Expanded(
-                  child: _buildStatColumn('Balance', balance, currency),
-                ),
-                Expanded(
-                  child: _buildStatColumn('Equity', equity, currency),
-                ),
-                Expanded(
-                  child: _buildPLColumn(profit, balance, currency, _includeCommissionSwap),
+                  child: _buildPLColumn(
+                    profit,
+                    balance,
+                    currency,
+                    _includeCommissionSwap,
+                  ),
                 ),
               ],
             ),
@@ -1120,17 +1271,29 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: const TextStyle(color: AppColors.textSecondary, fontSize: 11)),
+        Text(
+          label,
+          style: const TextStyle(color: AppColors.textSecondary, fontSize: 11),
+        ),
         const SizedBox(height: 2),
         Text(
           Formatters.formatCurrency(value),
-          style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+          ),
         ),
       ],
     );
   }
 
-  Widget _buildPLColumn(double profit, double balance, String currency, bool isNetPL) {
+  Widget _buildPLColumn(
+    double profit,
+    double balance,
+    String currency,
+    bool isNetPL,
+  ) {
     final isPositive = profit >= 0;
     final plPercent = balance > 0 ? (profit / balance) * 100 : 0.0;
     return Column(
@@ -1138,14 +1301,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       children: [
         Row(
           children: [
-            Text(isNetPL ? 'Net P/L' : 'P/L', style: const TextStyle(color: AppColors.textSecondary, fontSize: 11)),
+            Text(
+              isNetPL ? 'Net P/L' : 'P/L',
+              style: const TextStyle(
+                color: AppColors.textSecondary,
+                fontSize: 11,
+              ),
+            ),
             if (_showPLPercent && balance > 0) ...[
               const SizedBox(width: 8),
               Text(
                 '${plPercent.toStringAsFixed(2)}%',
                 style: TextStyle(
-                  color: profit == 0 
-                      ? Colors.white 
+                  color: profit == 0
+                      ? Colors.white
                       : (profit > 0 ? AppColors.primary : AppColors.error),
                   fontSize: 11,
                 ),
