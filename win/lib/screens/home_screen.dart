@@ -129,6 +129,18 @@ class _HomeScreenState extends State<HomeScreen> {
         _connection?.send({'action': 'pong'});
         break;
 
+      case 'manual_disconnect':
+        // User manually disconnected from the app - show QR code again
+        _addLog('📱 Mobile disconnected');
+        setState(() {
+          _mobileConnected = false;
+          _mobileActive = false;
+          _mobileHasConnected = false;  // Reset so QR shows
+          _mobileDeviceName = null;
+        });
+        _idleTimer?.cancel();
+        break;
+
       case 'get_accounts':
         // Send real account data from EA
         _connection?.send({

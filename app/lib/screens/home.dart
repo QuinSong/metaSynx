@@ -77,8 +77,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       case AppLifecycleState.inactive:
       case AppLifecycleState.hidden:
       case AppLifecycleState.detached:
-        // App went to background - stop polling
+        // App went to background - stop polling and track time
         _isAppInForeground = false;
+        _connection.onAppBackgrounded();
         _stopRefreshTimer();
         break;
     }
@@ -760,13 +761,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   roomId: _roomId,
                   onDisconnect: _disconnect,
                 ),
-                // Show loading accounts if connected to bridge but no accounts yet
-                if (_connectionState == relay.ConnectionState.connected &&
-                    _bridgeConnected &&
-                    _accountsNotifier.value.isEmpty) ...[
-                  const SizedBox(height: 24),
-                  _buildLoadingAccounts(),
-                ],
               ],
             ),
           ),
@@ -972,19 +966,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           initialTP: tp,
           onPlaceOrder: _placeOrder,
         ),
-      ),
-    );
-  }
-
-  Widget _buildLoadingAccounts() {
-    return const Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          CircularProgressIndicator(color: AppColors.primary),
-          SizedBox(height: 16),
-          Text('Loading accounts...', style: AppTextStyles.body),
-        ],
       ),
     );
   }
