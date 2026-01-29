@@ -27,6 +27,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final relay.RelayConnection _connection = relay.RelayConnection();
   relay.ConnectionState _connectionState = relay.ConnectionState.disconnected;
   bool _bridgeConnected = false;
+  bool _hasSavedConnection = false; // True if we have a saved connection config
   String? _roomId;
   final ValueNotifier<List<Map<String, dynamic>>> _accountsNotifier =
       ValueNotifier<List<Map<String, dynamic>>>([]);
@@ -43,8 +44,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Map<String, double> _lotRatios = {};
   Map<String, String> _symbolSuffixes = {};
   Set<String> _preferredPairs = {};
-  bool _includeCommissionSwap = false;
-  bool _showPLPercent = false;
+  bool _includeCommissionSwap = true;
+  bool _showPLPercent = true;
   bool _confirmBeforeClose = true;
   Timer? _refreshTimer;
   bool _isAppInForeground = true;
@@ -120,11 +121,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _preferredPairs = decoded.map((e) => e.toString()).toSet();
     }
 
-    // Load include commission/swap setting
-    _includeCommissionSwap = prefs.getBool('include_commission_swap') ?? false;
+    // Load include commission/swap setting (default true)
+    _includeCommissionSwap = prefs.getBool('include_commission_swap') ?? true;
 
-    // Load show P/L % setting
-    _showPLPercent = prefs.getBool('show_pl_percent') ?? false;
+    // Load show P/L % setting (default true)
+    _showPLPercent = prefs.getBool('show_pl_percent') ?? true;
 
     // Load confirm before close setting (default true)
     _confirmBeforeClose = prefs.getBool('confirm_before_close') ?? true;
@@ -241,6 +242,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         final config = jsonDecode(lastConnection) as Map<String, dynamic>;
         setState(() {
           _roomId = config['room'];
+          _hasSavedConnection = true;
         });
         await _connection.restoreConnection(config);
       } catch (e) {
@@ -521,6 +523,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   void _disconnect() async {
+    // Clear room ID first to prevent "room expired" error from triggering
+    _roomId = null;
+    _hasSavedConnection = false;
+
     _connection.disconnect();
     _stopAccountsRefresh();
     final prefs = await SharedPreferences.getInstance();
@@ -528,7 +534,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     setState(() {
       _connectionState = relay.ConnectionState.disconnected;
       _bridgeConnected = false;
-      _roomId = null;
       _accountsNotifier.value = [];
       _positionsNotifier.value = [];
     });
@@ -743,6 +748,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     // When not connected and no cached accounts
     final bottomPadding = MediaQuery.of(context).padding.bottom;
 
+    // Show reconnecting card if we have a saved connection but not fully connected
+    final isReconnecting =
+        _hasSavedConnection &&
+        !(_connectionState == relay.ConnectionState.connected &&
+            _bridgeConnected);
+
     return SafeArea(
       bottom: false, // We'll handle bottom separately for the button
       child: Column(
@@ -760,12 +771,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   bridgeConnected: _bridgeConnected,
                   roomId: _roomId,
                   onDisconnect: _disconnect,
+                  isReconnecting: isReconnecting,
                 ),
               ],
             ),
           ),
           const Spacer(),
-          if (_connectionState == relay.ConnectionState.disconnected)
+          if (_connectionState == relay.ConnectionState.disconnected &&
+              !_hasSavedConnection)
             Padding(
               padding: EdgeInsets.fromLTRB(24, 24, 24, 24 + bottomPadding),
               child: ScanButton(onPressed: _openScanner),
@@ -888,16 +901,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Widget _buildHeader() {
-    // Show buttons if connected OR if we have cached accounts (reconnecting)
+    // Show buttons if connected OR if we have cached accounts OR if we have a saved connection (reconnecting)
     final showButtons =
         (_connectionState == relay.ConnectionState.connected &&
             _bridgeConnected &&
             _accountsNotifier.value.isNotEmpty) ||
-        _accountsNotifier.value.isNotEmpty;
+        _accountsNotifier.value.isNotEmpty ||
+        _hasSavedConnection;
 
     return Row(
       children: [
-        const Text('METASYNX', style: AppTextStyles.heading),
+        Image.asset('assets/logo.png', height: 36),
         const Spacer(),
         if (showButtons) ...[
           IconButton(

@@ -3,32 +3,27 @@ import '../core/theme.dart';
 
 class MobileDeviceCard extends StatelessWidget {
   final String? deviceName;
-  final bool isActive;
 
   const MobileDeviceCard({
     super.key,
     this.deviceName,
-    this.isActive = true,
   });
 
   @override
   Widget build(BuildContext context) {
-    final color = isActive ? AppColors.primary : AppColors.warning;
-    final statusText = isActive ? 'Connected and ready' : 'Idle';
-    
     return Container(
       margin: const EdgeInsets.all(16),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [
-            color.withOpacity(0.15),
-            color.withOpacity(0.05),
+            AppColors.primary.withOpacity(0.15),
+            AppColors.primary.withOpacity(0.05),
           ],
         ),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: color.withOpacity(0.3),
+          color: AppColors.primary.withOpacity(0.3),
         ),
       ),
       child: Row(
@@ -36,12 +31,12 @@ class MobileDeviceCard extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: color.withOpacity(0.2),
+              color: AppColors.primary.withOpacity(0.2),
               borderRadius: BorderRadius.circular(8),
             ),
-            child: Icon(
+            child: const Icon(
               Icons.phone_android,
-              color: color,
+              color: AppColors.primary,
               size: 24,
             ),
           ),
@@ -58,10 +53,10 @@ class MobileDeviceCard extends StatelessWidget {
                     fontWeight: FontWeight.w600,
                   ),
                 ),
-                Text(
-                  statusText,
+                const Text(
+                  'Connected',
                   style: TextStyle(
-                    color: color,
+                    color: AppColors.primary,
                     fontSize: 13,
                   ),
                 ),
@@ -72,11 +67,11 @@ class MobileDeviceCard extends StatelessWidget {
             width: 10,
             height: 10,
             decoration: BoxDecoration(
-              color: color,
+              color: AppColors.primary,
               shape: BoxShape.circle,
               boxShadow: [
                 BoxShadow(
-                  color: color.withOpacity(0.5),
+                  color: AppColors.primary.withOpacity(0.5),
                   blurRadius: 6,
                   spreadRadius: 2,
                 ),

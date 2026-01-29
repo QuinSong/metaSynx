@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'dart:async';
 import '../core/config.dart';
 import '../core/theme.dart';
 import '../services/relay_connection.dart';
@@ -21,14 +20,10 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _roomId;
   String? _roomSecret;
   String? _qrData;
-  bool _mobileConnected = false;
-  bool _mobileActive = false;  // true when actively sending/receiving data
   bool _mobileHasConnected = false;  // true once mobile connects (hides QR until New Room)
   String? _mobileDeviceName;
   List<String> _logs = [];
   List<Map<String, dynamic>> _accounts = [];
-  Timer? _idleTimer;
-  static const _idleTimeout = Duration(seconds: 5);
 
   @override
   void initState() {
@@ -38,25 +33,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
-    _idleTimer?.cancel();
     _connection?.disconnect();
     _eaService.dispose();
     super.dispose();
-  }
-
-  void _resetIdleTimer() {
-    // Mark as active
-    if (!_mobileActive && _mobileConnected) {
-      setState(() => _mobileActive = true);
-    }
-    
-    // Reset the timer
-    _idleTimer?.cancel();
-    _idleTimer = Timer(_idleTimeout, () {
-      if (_mobileConnected && _mobileActive) {
-        setState(() => _mobileActive = false);
-      }
-    });
   }
 
   Future<void> _initializeServices() async {
@@ -75,8 +54,7 @@ class _HomeScreenState extends State<HomeScreen> {
       },
       onPairingStatusChanged: (mobileConnected, deviceName) {
         setState(() {
-          _mobileConnected = mobileConnected;
-          // Only update device name if provided (preserve it when going idle)
+          // Only update device name if provided
           if (deviceName != null && deviceName.isNotEmpty) {
             _mobileDeviceName = deviceName;
           }
@@ -84,7 +62,6 @@ class _HomeScreenState extends State<HomeScreen> {
           // Once mobile connects for the first time, set flag to hide QR code
           if (mobileConnected && !_mobileHasConnected) {
             _mobileHasConnected = true;
-            _mobileActive = true;
             // Only log on first connect
             _addLog('📱 Mobile connected: $deviceName');
           }
@@ -120,9 +97,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _handleMessage(Map<String, dynamic> message) {
     final action = message['action'] as String?;
-    
-    // Mark mobile as active when we receive any message
-    _resetIdleTimer();
 
     switch (action) {
       case 'ping':
@@ -133,12 +107,9 @@ class _HomeScreenState extends State<HomeScreen> {
         // User manually disconnected from the app - show QR code again
         _addLog('📱 Mobile disconnected');
         setState(() {
-          _mobileConnected = false;
-          _mobileActive = false;
           _mobileHasConnected = false;  // Reset so QR shows
           _mobileDeviceName = null;
         });
-        _idleTimer?.cancel();
         break;
 
       case 'get_accounts':
@@ -396,12 +367,9 @@ class _HomeScreenState extends State<HomeScreen> {
       _roomId = null;
       _roomSecret = null;
       _qrData = null;
-      _mobileConnected = false;
-      _mobileActive = false;
       _mobileHasConnected = false;  // Reset so QR shows again
       _mobileDeviceName = null;
     });
-    _idleTimer?.cancel();
     await _createRoomAndConnect();
   }
 
@@ -445,9 +413,10 @@ class _HomeScreenState extends State<HomeScreen> {
             padding: const EdgeInsets.all(24),
             child: Row(
               children: [
-                StatusIndicator(status: _status),
-                const SizedBox(width: 12),
-                const Text('METASYNX BRIDGE', style: AppTextStyles.heading),
+                Image.asset(
+                  'assets/logo.png',
+                  height: 32,
+                ),
               ],
             ),
           ),
@@ -524,7 +493,6 @@ class _HomeScreenState extends State<HomeScreen> {
         children: [
           if (_mobileHasConnected) MobileDeviceCard(
             deviceName: _mobileDeviceName,
-            isActive: _mobileActive,
           ),
           
           // MT4 Terminals section - always show

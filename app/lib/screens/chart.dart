@@ -88,6 +88,7 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
   bool _showBidAskLines = false; // B/A toggle
   double? _currentBid;
   double? _currentAsk;
+  bool _chartReady = false;  // True only after _onChartReady fires
   
   // Search overlay
   bool _showSearchOverlay = false;
@@ -292,6 +293,9 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
   }
 
   void _onChartReady() {
+    // Chart HTML is now loaded and ready to receive data
+    _chartReady = true;
+    
     // Chart is initialized, now start polling for data from MT4
     if (_useMT4Data && _selectedAccountIndex != null) {
       _hasReceivedData = false;
@@ -347,11 +351,14 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
   }
 
   void _onChartDataReceived(Map<String, dynamic> data) {
+    // Ignore data if chart is not ready (HTML being rebuilt)
+    if (!_chartReady) return;
+    
     // Verify data matches current request (ignore stale responses)
     final dataSymbol = data['symbol'] as String?;
     final dataTimeframe = data['timeframe']?.toString();
     
-    if (dataSymbol != null && dataSymbol != _currentSymbol) return;
+    if (dataSymbol != null && dataSymbol.toUpperCase() != _currentSymbol.toUpperCase()) return;
     if (dataTimeframe != null && dataTimeframe != _currentInterval) return;
     
     // Extract bid/ask
@@ -370,11 +377,17 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
     final candles = data['candles'] as List?;
     if (candles != null && candles.isNotEmpty) {
       final candlesJson = _candlesToJson(candles);
-      _controller.runJavaScript('setChartData($candlesJson);');
       
+      // If we haven't received data yet for this chart load, set full data
+      // Otherwise just update the last candle
       if (!_hasReceivedData) {
         _hasReceivedData = true;
         setState(() => _isLoading = false);
+        _controller.runJavaScript('setFullChartData($candlesJson);');
+      } else {
+        // Only update the last candle for subsequent responses
+        final lastCandleJson = _candleToJson(candles.last as Map<String, dynamic>);
+        _controller.runJavaScript('updateLastCandle($lastCandleJson);');
       }
     }
   }
@@ -1510,47 +1523,52 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
       return str.length - dotIndex - 1;
     }
     
-    // Function to set initial chart data (called once)
-    function setChartData(candles) {
+    // Function to set full chart data (called on first load)
+    function setFullChartData(candles) {
       if (!candles || candles.length === 0) return;
       
       // Detect decimals from first candle's close price
-      if (candles.length > 0) {
-        priceDecimals = detectDecimals(candles[0].close);
-        // Configure price scale precision
-        series.applyOptions({
-          priceFormat: {
-            type: 'price',
-            precision: priceDecimals,
-            minMove: Math.pow(10, -priceDecimals),
-          },
-        });
+      priceDecimals = detectDecimals(candles[0].close);
+      // Configure price scale precision
+      series.applyOptions({
+        priceFormat: {
+          type: 'price',
+          precision: priceDecimals,
+          minMove: Math.pow(10, -priceDecimals),
+        },
+      });
+      
+      // Always set full data
+      series.setData(candles);
+      document.getElementById('loading').style.display = 'none';
+      
+      // Add position lines if not already added
+      if (!chartInitialized) {
+        chartInitialized = true;
+        $positionLines
       }
       
-      if (!chartInitialized) {
-        // First time - set all data and position lines
-        chartInitialized = true;
-        series.setData(candles);
-        document.getElementById('loading').style.display = 'none';
-        
-        // Add position lines only once
-        $positionLines
-        
-        chart.timeScale().fitContent();
-      } else {
-        // Subsequent updates - only update the last candle
-        const lastCandle = candles[candles.length - 1];
-        series.update(lastCandle);
-      }
+      chart.timeScale().fitContent();
       
       const lastCandle = candles[candles.length - 1];
       lastPrice = lastCandle.close;
     }
     
-    // Function to update current candle
-    function updateCandle(candle) {
+    // Function to update just the last candle (for live updates)
+    function updateLastCandle(candle) {
+      if (!candle) return;
       series.update(candle);
       lastPrice = candle.close;
+    }
+    
+    // Legacy function for compatibility
+    function setChartData(candles) {
+      setFullChartData(candles);
+    }
+    
+    // Function to update current candle
+    function updateCandle(candle) {
+      updateLastCandle(candle);
     }
     
     // Bid/Ask price lines
@@ -1797,6 +1815,9 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
     if (symbol.isNotEmpty) {
       _addToRecentSearches(symbol);
     }
+    
+    // Mark chart as not ready until _onChartReady fires
+    _chartReady = false;
     
     setState(() {
       _currentSymbol = symbol;

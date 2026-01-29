@@ -70,7 +70,6 @@ class AccountDetailScreen extends StatefulWidget {
 
 class _AccountDetailScreenState extends State<AccountDetailScreen> {
   late int _accountIndex;
-  bool _positionsLoaded = false;
   Set<String> _selectedPairs = {};
   Set<String> _allKnownPairs = {};
   Set<String> _deselectedPairs = {}; // Track explicitly deselected pairs
@@ -147,7 +146,6 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
             ? currentPairs.difference(_deselectedPairs)
             : Set.from(currentPairs);
         _filtersInitialized = true;
-        _positionsLoaded = true;
       });
     } else if (_filtersInitialized) {
       // Auto-select any new pairs that appear (only if not previously deselected)
@@ -177,12 +175,6 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
       _allKnownPairs = _allKnownPairs.intersection(currentPairs);
       // Also clean up deselectedPairs
       _deselectedPairs = _deselectedPairs.intersection(currentPairs);
-    } else if (!_positionsLoaded) {
-      Future.delayed(const Duration(milliseconds: 1500), () {
-        if (mounted && !_positionsLoaded) {
-          setState(() => _positionsLoaded = true);
-        }
-      });
     }
   }
 
@@ -993,14 +985,14 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
         Row(
           children: [
             Text(
-              'POSITIONS${_positionsLoaded ? ' (${allPositions.length})' : ''}',
+              'POSITIONS (${allPositions.length})',
               style: AppTextStyles.label,
             ),
           ],
         ),
         
         // Pair filter chips
-        if (_positionsLoaded && pairCounts.isNotEmpty) ...[
+        if (pairCounts.isNotEmpty) ...[
           const SizedBox(height: 12),
           Wrap(
             spacing: 8,
@@ -1071,31 +1063,7 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
         
         const SizedBox(height: 16),
         
-        if (!_positionsLoaded)
-          Container(
-            padding: const EdgeInsets.all(32),
-            decoration: BoxDecoration(
-              color: AppColors.surface,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Center(
-              child: Column(
-                children: [
-                  SizedBox(
-                    width: 32,
-                    height: 32,
-                    child: CircularProgressIndicator(
-                      color: AppColors.primary,
-                      strokeWidth: 2,
-                    ),
-                  ),
-                  SizedBox(height: 16),
-                  Text('Loading positions...', style: AppTextStyles.body),
-                ],
-              ),
-            ),
-          )
-        else if (allPositions.isEmpty)
+        if (allPositions.isEmpty)
           Container(
             padding: const EdgeInsets.all(32),
             decoration: BoxDecoration(

@@ -299,7 +299,21 @@ class EAService {
     try {
       final content = await _readFileSafe(file);
       if (content == null || content.isEmpty) return null;
-      return jsonDecode(content) as Map<String, dynamic>;
+      final data = jsonDecode(content) as Map<String, dynamic>;
+      
+      // Verify the data is for the requested symbol/timeframe
+      // If not, return null - the correct data will come in a future poll
+      final dataSymbol = data['symbol'] as String?;
+      final dataTimeframe = data['timeframe']?.toString();
+      
+      if (dataSymbol == null || dataSymbol.toUpperCase() != symbol.toUpperCase()) {
+        return null;
+      }
+      if (dataTimeframe != null && dataTimeframe != timeframe) {
+        return null;
+      }
+      
+      return data;
     } catch (e) {
       return null;
     }

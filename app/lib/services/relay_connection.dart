@@ -1,4 +1,3 @@
-
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -14,18 +13,10 @@ enum ConnectionState {
 class RelayConnection {
   WebSocket? _socket;
   Timer? _pingTimer;
-  Timer? _pongTimeoutTimer;
   Timer? _reconnectTimer;
   Map<String, dynamic>? _connectionConfig;
   String? _deviceName;
-  int _reconnectAttempts = 0;
-  static const int _maxReconnectDelay = 60; // Max 60 seconds between attempts
-  static const int _baseReconnectDelay = 2; // Start with 2 seconds
-  DateTime? _lastPongReceived;
-  DateTime? _backgroundedAt;
-  static const Duration _staleConnectionThreshold = Duration(seconds: 10);
-  static const Duration _longBackgroundThreshold = Duration(seconds: 30);
-
+  
   ConnectionState _state = ConnectionState.disconnected;
   Function(ConnectionState)? onStateChanged;
   Function(bool)? onPairingStatusChanged;
@@ -36,8 +27,10 @@ class RelayConnection {
   Map<String, dynamic>? get connectionConfig => _connectionConfig;
 
   void _setState(ConnectionState newState) {
-    _state = newState;
-    onStateChanged?.call(newState);
+    if (_state != newState) {
+      _state = newState;
+      onStateChanged?.call(newState);
+    }
   }
 
   Future<void> connect(Map<String, dynamic> config) async {
@@ -52,17 +45,17 @@ class RelayConnection {
 
     try {
       final wsUrl = 'wss://$server/ws/relay/$roomId';
-      debugPrint('Connecting to $wsUrl (attempt ${_reconnectAttempts + 1})');
+      debugPrint('Connecting to $wsUrl');
 
       _socket = await WebSocket.connect(wsUrl)
-          .timeout(const Duration(seconds: 15));
+          .timeout(const Duration(seconds: 10));
 
       _socket!.listen(
         _onData,
-        onDone: _onDisconnected,
+        onDone: _onSocketClosed,
         onError: (error) {
           debugPrint('WebSocket error: $error');
-          _onDisconnected();
+          _onSocketClosed();
         },
       );
 
@@ -75,6 +68,7 @@ class RelayConnection {
       }));
     } catch (e) {
       debugPrint('Connection failed: $e');
+      _socket = null;
       _setState(ConnectionState.disconnected);
       _scheduleReconnect();
     }
@@ -102,19 +96,12 @@ class RelayConnection {
       final type = message['type'] as String?;
       final action = message['action'] as String?;
 
-      // Track pong responses for health check
-      if (action == 'pong') {
-        _lastPongReceived = DateTime.now();
-        _pongTimeoutTimer?.cancel();
-        return;
-      }
+      if (action == 'pong') return;
 
       switch (type) {
         case 'joined':
           debugPrint('Joined room: ${message['room_id']}');
           _setState(ConnectionState.connected);
-          _reconnectAttempts = 0; // Reset on successful connection
-          _lastPongReceived = DateTime.now();
           _startPingTimer();
           break;
 
@@ -127,21 +114,10 @@ class RelayConnection {
           debugPrint('Server error: ${message['message']}');
           final errorMsg = message['message'] as String?;
           
-          // Only clear config on permanent errors
-          if (errorMsg == 'Invalid room secret') {
-            debugPrint('Invalid secret - clearing config');
+          if (errorMsg == 'Invalid room secret' || 
+              errorMsg == 'Room not found or expired') {
             _connectionConfig = null;
             _setState(ConnectionState.disconnected);
-          } else if (errorMsg == 'Room not found or expired') {
-            // Room expired - keep config but stop reconnecting
-            // User will need to re-scan QR code
-            debugPrint('Room expired - clearing config');
-            _connectionConfig = null;
-            _setState(ConnectionState.disconnected);
-          } else {
-            // Temporary error - try reconnecting
-            _setState(ConnectionState.disconnected);
-            _scheduleReconnect();
           }
           break;
 
@@ -153,11 +129,11 @@ class RelayConnection {
     }
   }
 
-  void _onDisconnected() {
+  void _onSocketClosed() {
+    debugPrint('Socket closed');
     _stopPingTimer();
-    _pongTimeoutTimer?.cancel();
     _socket = null;
-
+    
     final wasConnected = _state == ConnectionState.connected;
     _setState(ConnectionState.disconnected);
     
@@ -165,50 +141,31 @@ class RelayConnection {
       onPairingStatusChanged?.call(false);
     }
     
-    // Always try to reconnect if we have config
     _scheduleReconnect();
   }
 
   void _scheduleReconnect() {
-    if (_connectionConfig == null) {
-      debugPrint('No connection config - not reconnecting');
-      return;
-    }
+    if (_connectionConfig == null) return;
 
     _reconnectTimer?.cancel();
-    
-    // Exponential backoff: 2, 4, 8, 16, 32, 60, 60, 60...
-    final delay = (_baseReconnectDelay * (1 << _reconnectAttempts.clamp(0, 5)))
-        .clamp(0, _maxReconnectDelay);
-    _reconnectAttempts++;
-    
-    debugPrint('Scheduling reconnect in $delay seconds (attempt $_reconnectAttempts)');
-    
-    _reconnectTimer = Timer(Duration(seconds: delay), () async {
+    _reconnectTimer = Timer(const Duration(seconds: 2), () {
       if (_state == ConnectionState.disconnected && _connectionConfig != null) {
-        await connect(_connectionConfig!);
+        connect(_connectionConfig!);
       }
     });
   }
 
   void _startPingTimer() {
-    _pingTimer?.cancel();
-    _pingTimer = Timer.periodic(const Duration(seconds: 30), (_) {
-      _sendPing();
+    _stopPingTimer();
+    _pingTimer = Timer.periodic(const Duration(seconds: 25), (_) {
+      if (_socket != null && _state == ConnectionState.connected) {
+        try {
+          _socket!.add(jsonEncode({'action': 'ping'}));
+        } catch (e) {
+          debugPrint('Ping failed: $e');
+        }
+      }
     });
-  }
-
-  void _sendPing() {
-    if (_socket != null) {
-      send({'action': 'ping'});
-      
-      // Set a timeout for pong response
-      _pongTimeoutTimer?.cancel();
-      _pongTimeoutTimer = Timer(const Duration(seconds: 5), () {
-        debugPrint('Pong timeout - connection appears dead');
-        _forceReconnect();
-      });
-    }
   }
 
   void _stopPingTimer() {
@@ -217,92 +174,32 @@ class RelayConnection {
   }
 
   void send(Map<String, dynamic> message) {
-    if (_socket != null) {
+    if (_socket != null && _state == ConnectionState.connected) {
       try {
         _socket!.add(jsonEncode(message));
       } catch (e) {
         debugPrint('Send error: $e');
-        _forceReconnect();
       }
     }
   }
 
-  /// Called when app goes to background
-  void onAppBackgrounded() {
-    _backgroundedAt = DateTime.now();
-    debugPrint('App backgrounded at $_backgroundedAt');
-  }
+  /// No-op - kept for compatibility
+  void onAppBackgrounded() {}
 
-  /// Force close current connection and reconnect fresh
-  Future<void> _forceReconnect() async {
-    if (_connectionConfig == null) return;
-    
-    debugPrint('Force reconnecting...');
-    
-    // Cancel timers
-    _reconnectTimer?.cancel();
-    _pingTimer?.cancel();
-    _pongTimeoutTimer?.cancel();
-    
-    // Close existing socket
-    try {
-      _socket?.close();
-    } catch (e) {
-      debugPrint('Error closing socket: $e');
-    }
-    _socket = null;
-    
-    // Reset state and reconnect
-    _reconnectAttempts = 0;
-    await connect(_connectionConfig!);
-  }
+  /// No-op - kept for compatibility  
+  Future<void> reconnectNow() async {}
 
-  /// Force immediate reconnection (call when app comes to foreground)
-  Future<void> reconnectNow() async {
-    if (_connectionConfig == null) return;
-    
-    // Cancel any scheduled reconnect
-    _reconnectTimer?.cancel();
-    
-    // Check if we were backgrounded for a long time
-    final wasBackgroundedLong = _backgroundedAt != null &&
-        DateTime.now().difference(_backgroundedAt!) > _longBackgroundThreshold;
-    
-    // Check if connection might be stale
-    final connectionMightBeStale = _lastPongReceived != null &&
-        DateTime.now().difference(_lastPongReceived!) > _staleConnectionThreshold;
-    
-    // If we think we're connected but might be stale, force reconnect
-    if (_state == ConnectionState.connected && _socket != null) {
-      if (wasBackgroundedLong || connectionMightBeStale) {
-        debugPrint('Connection might be stale (backgrounded: $wasBackgroundedLong, stale: $connectionMightBeStale) - forcing reconnect');
-        await _forceReconnect();
-      } else {
-        // Send a ping to verify connection is alive
-        debugPrint('Verifying connection with ping');
-        _sendPing();
-      }
-      return;
-    }
-    
-    // Not connected - reconnect immediately
-    _reconnectAttempts = 0;
-    debugPrint('Forcing immediate reconnect');
-    await connect(_connectionConfig!);
-  }
-
-  /// Restore connection from saved config (call on app startup)
   Future<void> restoreConnection(Map<String, dynamic> config) async {
     _connectionConfig = config;
-    _reconnectAttempts = 0;
     await connect(config);
   }
 
   void disconnect() {
-    // Send manual disconnect message so bridge knows it was intentional
-    if (_socket != null) {
+    debugPrint('Manual disconnect');
+    
+    if (_socket != null && _state == ConnectionState.connected) {
       try {
-        send({'action': 'manual_disconnect'});
+        _socket!.add(jsonEncode({'action': 'manual_disconnect'}));
       } catch (e) {
         debugPrint('Could not send disconnect message: $e');
       }
@@ -310,13 +207,9 @@ class RelayConnection {
     
     _reconnectTimer?.cancel();
     _stopPingTimer();
-    _pongTimeoutTimer?.cancel();
     _socket?.close();
     _socket = null;
     _connectionConfig = null;
-    _reconnectAttempts = 0;
-    _backgroundedAt = null;
-    _lastPongReceived = null;
     _setState(ConnectionState.disconnected);
     onPairingStatusChanged?.call(false);
   }

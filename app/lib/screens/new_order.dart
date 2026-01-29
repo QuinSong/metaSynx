@@ -424,6 +424,9 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
   }
 
   Widget _buildSymbolField() {
+    // Check if any suffix is configured
+    final hasSuffixes = widget.symbolSuffixes.values.any((s) => s.isNotEmpty);
+    
     return Row(
       children: [
         Expanded(
@@ -444,53 +447,55 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
             ),
           ),
         ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          child: Text(
-            '+',
-            style: TextStyle(
-              color: AppColors.textSecondary,
-              fontSize: 20,
-              fontWeight: FontWeight.w300,
-            ),
-          ),
-        ),
-        GestureDetector(
-          onTap: () {
-            setState(() {
-              _applySuffix = !_applySuffix;
-            });
-          },
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-            decoration: BoxDecoration(
-              color: _applySuffix ? AppColors.primary : AppColors.surface,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: _applySuffix ? AppColors.primary : AppColors.border,
+        if (hasSuffixes) ...[
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Text(
+              '+',
+              style: TextStyle(
+                color: AppColors.textSecondary,
+                fontSize: 20,
+                fontWeight: FontWeight.w300,
               ),
             ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  Icons.add_link,
-                  color: _applySuffix ? Colors.white : AppColors.textSecondary,
-                  size: 20,
+          ),
+          GestureDetector(
+            onTap: () {
+              setState(() {
+                _applySuffix = !_applySuffix;
+              });
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+              decoration: BoxDecoration(
+                color: _applySuffix ? AppColors.primary : AppColors.surface,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: _applySuffix ? AppColors.primary : AppColors.border,
                 ),
-                const SizedBox(width: 4),
-                Text(
-                  'Suffix',
-                  style: TextStyle(
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.add_link,
                     color: _applySuffix ? Colors.white : AppColors.textSecondary,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
+                    size: 20,
                   ),
-                ),
-              ],
+                  const SizedBox(width: 4),
+                  Text(
+                    'Suffix',
+                    style: TextStyle(
+                      color: _applySuffix ? Colors.white : AppColors.textSecondary,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
-        ),
+        ],
       ],
     );
   }
