@@ -566,14 +566,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    final isFullyConnected =
-        _connectionState == relay.ConnectionState.connected &&
-        _bridgeConnected &&
-        _accountsNotifier.value.isNotEmpty;
+    final isConnectedToBridge =
+        _connectionState == relay.ConnectionState.connected && _bridgeConnected;
 
-    // Show accounts view if connected OR if we have cached accounts (reconnecting)
+    // Show accounts view if connected to bridge OR if we have cached accounts (reconnecting)
     final showAccountsView =
-        isFullyConnected || _accountsNotifier.value.isNotEmpty;
+        isConnectedToBridge || _accountsNotifier.value.isNotEmpty;
 
     return Scaffold(
       body: showAccountsView
@@ -698,43 +696,78 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             isReconnecting: isReconnecting,
           ),
           const SizedBox(height: 24),
-          Text(
-            'ACCOUNTS (${_accountsNotifier.value.length})',
-            style: AppTextStyles.label,
-          ),
-          const SizedBox(height: 12),
           Expanded(
             child: ValueListenableBuilder<List<Map<String, dynamic>>>(
               valueListenable: _accountsNotifier,
               builder: (context, accounts, _) {
-                return ValueListenableBuilder<List<Map<String, dynamic>>>(
-                  valueListenable: _positionsNotifier,
-                  builder: (context, positions, _) {
-                    // Sort accounts with main account first
-                    final sortedAccounts = List<Map<String, dynamic>>.from(
-                      accounts,
-                    );
-                    sortedAccounts.sort((a, b) {
-                      final aIsMain = a['account'] == _mainAccountNum;
-                      final bIsMain = b['account'] == _mainAccountNum;
-                      if (aIsMain && !bIsMain) return -1;
-                      if (!aIsMain && bIsMain) return 1;
-                      return (a['index'] as int? ?? 0).compareTo(
-                        b['index'] as int? ?? 0,
-                      );
-                    });
-                    return ListView(
-                      children: [
-                        // Show totals section if more than 1 account
-                        if (sortedAccounts.length > 1)
-                          _buildTotalsSection(sortedAccounts, positions),
-                        // Account cards
-                        ...sortedAccounts.map(
-                          (account) => _buildAccountCard(account),
-                        ),
-                      ],
-                    );
-                  },
+                // Show loading indicator when fully connected (green) but no accounts yet
+                if (accounts.isEmpty && isFullyConnected) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              color: AppColors.primary,
+                              strokeWidth: 2,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Text(
+                            'Loading accounts...',
+                            style: TextStyle(
+                              color: AppColors.textSecondary,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  );
+                }
+
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'ACCOUNTS (${accounts.length})',
+                      style: AppTextStyles.label,
+                    ),
+                    const SizedBox(height: 12),
+                    Expanded(
+                      child: ValueListenableBuilder<List<Map<String, dynamic>>>(
+                        valueListenable: _positionsNotifier,
+                        builder: (context, positions, _) {
+                          // Sort accounts with main account first
+                          final sortedAccounts =
+                              List<Map<String, dynamic>>.from(accounts);
+                          sortedAccounts.sort((a, b) {
+                            final aIsMain = a['account'] == _mainAccountNum;
+                            final bIsMain = b['account'] == _mainAccountNum;
+                            if (aIsMain && !bIsMain) return -1;
+                            if (!aIsMain && bIsMain) return 1;
+                            return (a['index'] as int? ?? 0).compareTo(
+                              b['index'] as int? ?? 0,
+                            );
+                          });
+                          return ListView(
+                            children: [
+                              // Show totals section if more than 1 account
+                              if (sortedAccounts.length > 1)
+                                _buildTotalsSection(sortedAccounts, positions),
+                              // Account cards
+                              ...sortedAccounts.map(
+                                (account) => _buildAccountCard(account),
+                              ),
+                            ],
+                          );
+                        },
+                      ),
+                    ),
+                  ],
                 );
               },
             ),

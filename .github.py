@@ -2,7 +2,7 @@ import os
 import time
 
 
-msg = 'Chart cleanup attempt 2'
+msg = 'Chart cleanup fixed'
 
 
 os.system('git add .')

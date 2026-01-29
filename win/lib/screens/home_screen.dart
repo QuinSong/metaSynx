@@ -415,7 +415,7 @@ class _HomeScreenState extends State<HomeScreen> {
               children: [
                 Image.asset(
                   'assets/logo.png',
-                  height: 32,
+                  height: 50,
                 ),
               ],
             ),
