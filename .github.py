@@ -2,7 +2,7 @@ import os
 import time
 
 
-msg = 'done with bridge logs cleanup, updated PROJECT.md'
+msg = 'QR code cleanup 1'
 
 
 os.system('git add .')

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:async';
 import '../core/config.dart';
 import '../core/theme.dart';
 import '../services/relay_connection.dart';
@@ -21,14 +22,41 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _roomSecret;
   String? _qrData;
   bool _mobileConnected = false;
+  bool _mobileActive = false;  // true when actively sending/receiving data
+  bool _mobileHasConnected = false;  // true once mobile connects (hides QR until New Room)
   String? _mobileDeviceName;
   List<String> _logs = [];
   List<Map<String, dynamic>> _accounts = [];
+  Timer? _idleTimer;
+  static const _idleTimeout = Duration(seconds: 5);
 
   @override
   void initState() {
     super.initState();
     _initializeServices();
+  }
+
+  @override
+  void dispose() {
+    _idleTimer?.cancel();
+    _connection?.disconnect();
+    _eaService.dispose();
+    super.dispose();
+  }
+
+  void _resetIdleTimer() {
+    // Mark as active
+    if (!_mobileActive && _mobileConnected) {
+      setState(() => _mobileActive = true);
+    }
+    
+    // Reset the timer
+    _idleTimer?.cancel();
+    _idleTimer = Timer(_idleTimeout, () {
+      if (_mobileConnected && _mobileActive) {
+        setState(() => _mobileActive = false);
+      }
+    });
   }
 
   Future<void> _initializeServices() async {
@@ -46,14 +74,29 @@ class _HomeScreenState extends State<HomeScreen> {
         setState(() => _status = status);
       },
       onPairingStatusChanged: (mobileConnected, deviceName) {
+        final wasConnected = _mobileConnected;
+        
         setState(() {
           _mobileConnected = mobileConnected;
           _mobileDeviceName = deviceName;
+          
+          // Once mobile connects, set flag to hide QR code
+          if (mobileConnected && !wasConnected) {
+            _mobileHasConnected = true;
+            _mobileActive = true;
+          }
+          
+          // When mobile disconnects, mark as inactive but keep _mobileHasConnected true
+          if (!mobileConnected) {
+            _mobileActive = false;
+          }
         });
-        if (mobileConnected) {
+        
+        // Only log on actual state changes
+        if (mobileConnected && !wasConnected) {
           _addLog('📱 Mobile connected: $deviceName');
-        } else if (_logs.isNotEmpty) {
-          // Only log disconnect if we've had activity (not on startup)
+        } else if (!mobileConnected && wasConnected) {
+          // Mobile actually disconnected (not just idle)
           _addLog('📱 Mobile disconnected');
         }
       },
@@ -84,6 +127,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _handleMessage(Map<String, dynamic> message) {
     final action = message['action'] as String?;
+    
+    // Mark mobile as active when we receive any message
+    _resetIdleTimer();
 
     switch (action) {
       case 'ping':
@@ -341,8 +387,11 @@ class _HomeScreenState extends State<HomeScreen> {
       _roomSecret = null;
       _qrData = null;
       _mobileConnected = false;
+      _mobileActive = false;
+      _mobileHasConnected = false;  // Reset so QR shows again
       _mobileDeviceName = null;
     });
+    _idleTimer?.cancel();
     await _createRoomAndConnect();
   }
 
@@ -353,13 +402,6 @@ class _HomeScreenState extends State<HomeScreen> {
       _logs.insert(0, '$timestamp  $message');
       if (_logs.length > 100) _logs.removeLast();
     });
-  }
-
-  @override
-  void dispose() {
-    _connection?.disconnect();
-    _eaService.dispose();
-    super.dispose();
   }
 
   @override
@@ -407,19 +449,26 @@ class _HomeScreenState extends State<HomeScreen> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Text(
-                    _mobileConnected ? 'MOBILE PAIRED' : 'SCAN TO CONNECT',
+                    _mobileHasConnected 
+                        ? (_mobileConnected ? 'MOBILE PAIRED' : 'MOBILE DISCONNECTED')
+                        : 'SCAN TO CONNECT',
                     style: TextStyle(
                       fontSize: 14,
                       letterSpacing: 3,
-                      color: _mobileConnected
-                          ? AppColors.primary
+                      color: _mobileHasConnected
+                          ? (_mobileActive ? AppColors.primary : AppColors.warning)
                           : AppColors.textSecondary,
                     ),
                   ),
                   const SizedBox(height: 24),
 
-                  if (_mobileConnected)
-                    PairedStatus(deviceName: _mobileDeviceName)
+                  // Show PairedStatus if mobile has ever connected, otherwise show QR
+                  if (_mobileHasConnected)
+                    PairedStatus(
+                      deviceName: _mobileDeviceName,
+                      isActive: _mobileActive,
+                      isConnected: _mobileConnected,
+                    )
                   else
                     QrCodeDisplay(
                       qrData: _qrData,
@@ -469,7 +518,11 @@ class _HomeScreenState extends State<HomeScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (_mobileConnected) MobileDeviceCard(deviceName: _mobileDeviceName),
+          if (_mobileHasConnected) MobileDeviceCard(
+            deviceName: _mobileDeviceName,
+            isActive: _mobileActive,
+            isConnected: _mobileConnected,
+          ),
           
           // MT4 Terminals section - always show
           Padding(

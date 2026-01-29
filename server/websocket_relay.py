@@ -32,7 +32,7 @@ API_KEY = "msxkey2026"              # API key for authentication
 ROOM_EXPIRY_MINUTES = 1440          # Room expires after 24 hours of NO activity (bridge disconnected)
 ROOM_CODE_LENGTH = 8                # Length of room codes
 ROOM_SECRET_LENGTH = 16             # Length of room secrets
-MAX_ROOMS_PER_IP = 10               # Prevent abuse
+MAX_ROOMS_PER_IP = 5                # Prevent abuse
 SERVER_HOST = "server1.metasynx.io" # Server hostname for WebSocket URL
 
 # ============================================
@@ -200,20 +200,21 @@ class RelayManager:
         return True
     
     async def leave_room(self, room_id: str, role: str):
-        """Leave a room"""
+        """Leave a room. If bridge leaves, delete the entire room."""
         room = self.get_room(room_id)
         if not room:
             return
         
         if role == "bridge":
-            room.bridge = None
-            print(f"[Room {room_id}] Bridge left")
+            # Bridge disconnected - delete the entire room
+            # Without a bridge, the room is useless
+            print(f"[Room {room_id}] Bridge disconnected - deleting room")
+            await self.close_room(room_id)
         elif role == "mobile":
             room.mobile = None
             print(f"[Room {room_id}] Mobile left")
-        
-        # Notify remaining participant
-        await self._notify_pairing_status(room)
+            # Notify bridge that mobile disconnected
+            await self._notify_pairing_status(room)
     
     async def _notify_pairing_status(self, room: Room):
         """Notify participants about pairing status"""

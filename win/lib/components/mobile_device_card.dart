@@ -3,27 +3,46 @@ import '../core/theme.dart';
 
 class MobileDeviceCard extends StatelessWidget {
   final String? deviceName;
+  final bool isActive;
+  final bool isConnected;
 
   const MobileDeviceCard({
     super.key,
     this.deviceName,
+    this.isActive = true,
+    this.isConnected = true,
   });
 
   @override
   Widget build(BuildContext context) {
+    // Determine color and status based on connection and activity
+    Color color;
+    String statusText;
+    
+    if (!isConnected) {
+      color = AppColors.error;
+      statusText = 'Connection lost';
+    } else if (isActive) {
+      color = AppColors.primary;
+      statusText = 'Connected and ready';
+    } else {
+      color = AppColors.warning;
+      statusText = 'Idle';
+    }
+    
     return Container(
       margin: const EdgeInsets.all(16),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [
-            AppColors.primaryWithOpacity(0.15),
-            AppColors.primaryWithOpacity(0.05),
+            color.withOpacity(0.15),
+            color.withOpacity(0.05),
           ],
         ),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: AppColors.primaryWithOpacity(0.3),
+          color: color.withOpacity(0.3),
         ),
       ),
       child: Row(
@@ -31,12 +50,12 @@ class MobileDeviceCard extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: AppColors.primaryWithOpacity(0.2),
+              color: color.withOpacity(0.2),
               borderRadius: BorderRadius.circular(8),
             ),
-            child: const Icon(
+            child: Icon(
               Icons.phone_android,
-              color: AppColors.primary,
+              color: color,
               size: 24,
             ),
           ),
@@ -53,10 +72,10 @@ class MobileDeviceCard extends StatelessWidget {
                     fontWeight: FontWeight.w600,
                   ),
                 ),
-                const Text(
-                  'Connected and ready',
+                Text(
+                  statusText,
                   style: TextStyle(
-                    color: AppColors.primary,
+                    color: color,
                     fontSize: 13,
                   ),
                 ),
@@ -67,11 +86,11 @@ class MobileDeviceCard extends StatelessWidget {
             width: 10,
             height: 10,
             decoration: BoxDecoration(
-              color: AppColors.primary,
+              color: color,
               shape: BoxShape.circle,
               boxShadow: [
                 BoxShadow(
-                  color: AppColors.primaryWithOpacity(0.5),
+                  color: color.withOpacity(0.5),
                   blurRadius: 6,
                   spreadRadius: 2,
                 ),
