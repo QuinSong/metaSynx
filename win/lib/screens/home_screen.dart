@@ -74,11 +74,12 @@ class _HomeScreenState extends State<HomeScreen> {
         setState(() => _status = status);
       },
       onPairingStatusChanged: (mobileConnected, deviceName) {
-        final wasConnected = _mobileConnected;
-        
         setState(() {
           _mobileConnected = mobileConnected;
-          _mobileDeviceName = deviceName;
+          // Only update device name if provided (preserve it when going idle)
+          if (deviceName != null && deviceName.isNotEmpty) {
+            _mobileDeviceName = deviceName;
+          }
           
           // Once mobile connects for the first time, set flag to hide QR code
           if (mobileConnected && !_mobileHasConnected) {

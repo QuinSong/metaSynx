@@ -2,7 +2,7 @@ import os
 import time
 
 
-msg = 'QR code cleanup 2'
+msg = 'QR code cleanup 3'
 
 
 os.system('git add .')
