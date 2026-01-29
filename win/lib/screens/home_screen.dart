@@ -80,25 +80,17 @@ class _HomeScreenState extends State<HomeScreen> {
           _mobileConnected = mobileConnected;
           _mobileDeviceName = deviceName;
           
-          // Once mobile connects, set flag to hide QR code
-          if (mobileConnected && !wasConnected) {
+          // Once mobile connects for the first time, set flag to hide QR code
+          if (mobileConnected && !_mobileHasConnected) {
             _mobileHasConnected = true;
             _mobileActive = true;
-          }
-          
-          // When mobile disconnects, mark as inactive but keep _mobileHasConnected true
-          if (!mobileConnected) {
-            _mobileActive = false;
+            // Only log on first connect
+            _addLog('📱 Mobile connected: $deviceName');
           }
         });
         
-        // Only log on actual state changes
-        if (mobileConnected && !wasConnected) {
-          _addLog('📱 Mobile connected: $deviceName');
-        } else if (!mobileConnected && wasConnected) {
-          // Mobile actually disconnected (not just idle)
-          _addLog('📱 Mobile disconnected');
-        }
+        // Don't log disconnects here - relay sends disconnect when app is backgrounded
+        // We only want to log when user manually disconnects or creates new room
       },
       onMessageReceived: _handleMessage,
       onLog: _addLog,
@@ -381,6 +373,11 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _regenerateRoom() async {
+    // Log disconnect if mobile was connected
+    if (_mobileHasConnected) {
+      _addLog('📱 Mobile disconnected');
+    }
+    
     _connection?.disconnect();
     setState(() {
       _roomId = null;
@@ -449,26 +446,20 @@ class _HomeScreenState extends State<HomeScreen> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Text(
-                    _mobileHasConnected 
-                        ? (_mobileConnected ? 'MOBILE PAIRED' : 'MOBILE DISCONNECTED')
-                        : 'SCAN TO CONNECT',
+                    _mobileHasConnected ? 'MOBILE PAIRED' : 'SCAN TO CONNECT',
                     style: TextStyle(
                       fontSize: 14,
                       letterSpacing: 3,
                       color: _mobileHasConnected
-                          ? (_mobileActive ? AppColors.primary : AppColors.warning)
+                          ? AppColors.primary
                           : AppColors.textSecondary,
                     ),
                   ),
                   const SizedBox(height: 24),
 
-                  // Show PairedStatus if mobile has ever connected, otherwise show QR
+                  // Show PairedStatus (always green) if mobile has connected, otherwise show QR
                   if (_mobileHasConnected)
-                    PairedStatus(
-                      deviceName: _mobileDeviceName,
-                      isActive: _mobileActive,
-                      isConnected: _mobileConnected,
-                    )
+                    PairedStatus(deviceName: _mobileDeviceName)
                   else
                     QrCodeDisplay(
                       qrData: _qrData,
@@ -521,7 +512,6 @@ class _HomeScreenState extends State<HomeScreen> {
           if (_mobileHasConnected) MobileDeviceCard(
             deviceName: _mobileDeviceName,
             isActive: _mobileActive,
-            isConnected: _mobileConnected,
           ),
           
           // MT4 Terminals section - always show

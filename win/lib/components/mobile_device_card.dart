@@ -4,31 +4,17 @@ import '../core/theme.dart';
 class MobileDeviceCard extends StatelessWidget {
   final String? deviceName;
   final bool isActive;
-  final bool isConnected;
 
   const MobileDeviceCard({
     super.key,
     this.deviceName,
     this.isActive = true,
-    this.isConnected = true,
   });
 
   @override
   Widget build(BuildContext context) {
-    // Determine color and status based on connection and activity
-    Color color;
-    String statusText;
-    
-    if (!isConnected) {
-      color = AppColors.error;
-      statusText = 'Connection lost';
-    } else if (isActive) {
-      color = AppColors.primary;
-      statusText = 'Connected and ready';
-    } else {
-      color = AppColors.warning;
-      statusText = 'Idle';
-    }
+    final color = isActive ? AppColors.primary : AppColors.warning;
+    final statusText = isActive ? 'Connected and ready' : 'Idle';
     
     return Container(
       margin: const EdgeInsets.all(16),
