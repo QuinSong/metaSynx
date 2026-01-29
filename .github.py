@@ -2,7 +2,7 @@ import os
 import time
 
 
-msg = 'done with bridge logs cleanup'
+msg = 'done with bridge logs cleanup, updated PROJECT.md'
 
 
 os.system('git add .')
