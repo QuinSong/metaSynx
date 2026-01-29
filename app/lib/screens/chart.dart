@@ -109,6 +109,7 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
     {'label': '4H', 'value': '240'},
     {'label': '1D', 'value': 'D'},
     {'label': '1W', 'value': 'W'},
+    {'label': '1M', 'value': 'MN'},
   ];
 
   bool get _useMT4Data => 
@@ -358,7 +359,8 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
     final dataSymbol = data['symbol'] as String?;
     final dataTimeframe = data['timeframe']?.toString();
     
-    if (dataSymbol != null && dataSymbol.toUpperCase() != _currentSymbol.toUpperCase()) return;
+    if (dataSymbol == null) return;
+    if (dataSymbol.toUpperCase() != _currentSymbol.toUpperCase()) return;
     if (dataTimeframe != null && dataTimeframe != _currentInterval) return;
     
     // Extract bid/ask
@@ -368,7 +370,6 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
       _currentBid = (bid is num) ? bid.toDouble() : double.tryParse(bid.toString());
       _currentAsk = (ask is num) ? ask.toDouble() : double.tryParse(ask.toString());
       
-      // Always update bid/ask (this updates spread display and lines if visible)
       if (_currentBid != null && _currentAsk != null) {
         _controller.runJavaScript('updateBidAsk($_currentBid, $_currentAsk);');
       }
@@ -378,16 +379,12 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
     if (candles != null && candles.isNotEmpty) {
       final candlesJson = _candlesToJson(candles);
       
-      // If we haven't received data yet for this chart load, set full data
-      // Otherwise just update the last candle
+      // Always set full data - simpler and more robust
+      _controller.runJavaScript('setFullChartData($candlesJson);');
+      
       if (!_hasReceivedData) {
         _hasReceivedData = true;
         setState(() => _isLoading = false);
-        _controller.runJavaScript('setFullChartData($candlesJson);');
-      } else {
-        // Only update the last candle for subsequent responses
-        final lastCandleJson = _candleToJson(candles.last as Map<String, dynamic>);
-        _controller.runJavaScript('updateLastCandle($lastCandleJson);');
       }
     }
   }
@@ -1523,7 +1520,7 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
       return str.length - dotIndex - 1;
     }
     
-    // Function to set full chart data (called on first load)
+    // Function to set full chart data
     function setFullChartData(candles) {
       if (!candles || candles.length === 0) return;
       
@@ -1542,13 +1539,13 @@ class _ChartScreenState extends State<ChartScreen> with WidgetsBindingObserver {
       series.setData(candles);
       document.getElementById('loading').style.display = 'none';
       
-      // Add position lines if not already added
+      // Add position lines only once
       if (!chartInitialized) {
         chartInitialized = true;
         $positionLines
+        // Fit content only on first load
+        chart.timeScale().fitContent();
       }
-      
-      chart.timeScale().fitContent();
       
       const lastCandle = candles[candles.length - 1];
       lastPrice = lastCandle.close;

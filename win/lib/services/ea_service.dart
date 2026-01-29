@@ -301,21 +301,42 @@ class EAService {
       if (content == null || content.isEmpty) return null;
       final data = jsonDecode(content) as Map<String, dynamic>;
       
-      // Verify the data is for the requested symbol/timeframe
-      // If not, return null - the correct data will come in a future poll
+      // Verify the data is for the requested symbol
       final dataSymbol = data['symbol'] as String?;
-      final dataTimeframe = data['timeframe']?.toString();
       
       if (dataSymbol == null || dataSymbol.toUpperCase() != symbol.toUpperCase()) {
         return null;
       }
-      if (dataTimeframe != null && dataTimeframe != timeframe) {
-        return null;
+      
+      // Verify timeframe - EA writes numeric values, we might send string
+      final dataTimeframe = data['timeframe'];
+      if (dataTimeframe != null) {
+        final requestedTfNumeric = _timeframeToMinutes(timeframe);
+        final dataTfNumeric = dataTimeframe is int ? dataTimeframe : int.tryParse(dataTimeframe.toString());
+        if (dataTfNumeric != null && requestedTfNumeric != null && dataTfNumeric != requestedTfNumeric) {
+          return null;
+        }
       }
       
       return data;
     } catch (e) {
       return null;
+    }
+  }
+  
+  /// Convert timeframe string to minutes for comparison
+  int? _timeframeToMinutes(String tf) {
+    switch (tf.toUpperCase()) {
+      case '1': case 'M1': return 1;
+      case '5': case 'M5': return 5;
+      case '15': case 'M15': return 15;
+      case '30': case 'M30': return 30;
+      case '60': case 'H1': return 60;
+      case '240': case 'H4': return 240;
+      case 'D': case 'D1': case '1440': return 1440;
+      case 'W': case 'W1': case '10080': return 10080;
+      case 'MN': case 'MN1': case '43200': return 43200;
+      default: return int.tryParse(tf);
     }
   }
   
