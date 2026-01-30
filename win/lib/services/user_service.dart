@@ -1,101 +1,115 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 
 class UserService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   /// Check if user is already signed in elsewhere
   Future<bool> isUserSignedInElsewhere(String uid) async {
-    final snapshot = await _firestore.collection('users').doc(uid).get();
-    if (!snapshot.exists) return false;
-    return snapshot.data()?['signedIn'] == true;
+    try {
+      final snapshot = await _firestore.collection('users').doc(uid).get();
+      if (!snapshot.exists) return false;
+      return snapshot.data()?['signedIn'] == true;
+    } catch (e) {
+      debugPrint('Error checking signedIn status: $e');
+      return false;
+    }
   }
 
-  /// Set signedIn flag to true
+  /// Set signedIn flag
   Future<void> setSignedIn(String uid, bool value) async {
-    await _firestore.collection('users').doc(uid).update({
-      'signedIn': value,
-    });
+    try {
+      // Use set with merge to create doc if it doesn't exist
+      await _firestore.collection('users').doc(uid).set({
+        'signedIn': value,
+      }, SetOptions(merge: true));
+    } catch (e) {
+      debugPrint('Error setting signedIn: $e');
+    }
   }
 
   // Get or create user document, returns assigned relay server
   Future<String> getOrAssignRelayServer(User user) async {
-    final userDoc = _firestore.collection('users').doc(user.uid);
-    final snapshot = await userDoc.get();
+    try {
+      final userDoc = _firestore.collection('users').doc(user.uid);
+      final snapshot = await userDoc.get();
 
-    if (snapshot.exists) {
-      final data = snapshot.data();
-      final relayServer = data?['relayServer'] as String?;
-      if (relayServer != null && relayServer.isNotEmpty) {
-        // Mark user as signed in
-        await setSignedIn(user.uid, true);
-        return relayServer;
+      if (snapshot.exists) {
+        final data = snapshot.data();
+        final relayServer = data?['relayServer'] as String?;
+        if (relayServer != null && relayServer.isNotEmpty) {
+          // Mark user as signed in
+          await setSignedIn(user.uid, true);
+          return relayServer;
+        }
       }
-    }
 
-    // User doesn't have a server assigned - assign one
-    final server = await _assignServerToUser(user, userDoc);
-    return server;
+      // User doesn't have a server assigned - assign one
+      final server = await _assignServerToUser(user, userDoc);
+      return server;
+    } catch (e) {
+      debugPrint('Error in getOrAssignRelayServer: $e');
+      // Return default server on error
+      return 'server1.metasynx.io';
+    }
   }
 
   Future<String> _assignServerToUser(User user, DocumentReference userDoc) async {
-    // Get the server with the lowest activeRooms
-    final serverStats = await _firestore
-        .collection('serverStats')
-        .where('status', isEqualTo: 'active')
-        .orderBy('activeRooms')
-        .limit(1)
-        .get();
+    try {
+      // Default server - when you have multiple servers, add selection logic here
+      const assignedServer = 'server1.metasynx.io';
 
-    String assignedServer;
-
-    if (serverStats.docs.isEmpty) {
-      // No servers in database - use default
-      assignedServer = 'server1.metasynx.io';
-      
-      // Create the serverStats document for future use
-      await _firestore.collection('serverStats').doc(assignedServer).set({
-        'activeRooms': 0,
-        'maxRooms': 500,
-        'status': 'active',
+      // Save user document with assigned server and signedIn flag
+      debugPrint('Creating user document for ${user.uid}');
+      await userDoc.set({
+        'email': user.email,
+        'relayServer': assignedServer,
+        'signedIn': true,
+        'createdAt': FieldValue.serverTimestamp(),
+        'lastLogin': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
-    } else {
-      assignedServer = serverStats.docs.first.id;
+      
+      debugPrint('User document created successfully');
+      return assignedServer;
+    } catch (e) {
+      debugPrint('Error in _assignServerToUser: $e');
+      return 'server1.metasynx.io';
     }
-
-    // Save user document with assigned server and signedIn flag
-    await userDoc.set({
-      'email': user.email,
-      'relayServer': assignedServer,
-      'signedIn': true,
-      'createdAt': FieldValue.serverTimestamp(),
-      'lastLogin': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
-
-    return assignedServer;
   }
 
   // Update last login timestamp
   Future<void> updateLastLogin(User user) async {
-    await _firestore.collection('users').doc(user.uid).update({
-      'lastLogin': FieldValue.serverTimestamp(),
-    });
+    try {
+      // Use set with merge in case document doesn't exist
+      await _firestore.collection('users').doc(user.uid).set({
+        'lastLogin': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    } catch (e) {
+      debugPrint('Error updating lastLogin: $e');
+    }
   }
 
   // Sign out - set signedIn to false
   Future<void> signOut(String uid) async {
     try {
-      await _firestore.collection('users').doc(uid).update({
+      // Use set with merge in case document doesn't exist
+      await _firestore.collection('users').doc(uid).set({
         'signedIn': false,
-      });
+      }, SetOptions(merge: true));
     } catch (e) {
-      // Ignore errors on sign out
+      debugPrint('Error in signOut: $e');
     }
   }
 
   // Get user data
   Future<Map<String, dynamic>?> getUserData(String uid) async {
-    final snapshot = await _firestore.collection('users').doc(uid).get();
-    return snapshot.data();
+    try {
+      final snapshot = await _firestore.collection('users').doc(uid).get();
+      return snapshot.data();
+    } catch (e) {
+      debugPrint('Error getting user data: $e');
+      return null;
+    }
   }
 }

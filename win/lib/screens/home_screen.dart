@@ -32,6 +32,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _mobileDeviceName;
   List<String> _logs = [];
   List<Map<String, dynamic>> _accounts = [];
+  bool _disposed = false;
 
   @override
   void initState() {
@@ -41,27 +42,41 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    _disposed = true;
     _connection?.disconnect();
     _eaService.dispose();
     super.dispose();
   }
 
   Future<void> _initializeServices() async {
+    if (_disposed) return;
+    
     // Initialize EA Service (silent)
-    _eaService.onLog = _addLog;
+    _eaService.onLog = (msg) {
+      if (!_disposed) _addLog(msg);
+    };
     _eaService.onAccountsUpdated = (accounts) {
-      setState(() => _accounts = accounts);
+      if (!_disposed && mounted) {
+        setState(() => _accounts = accounts);
+      }
     };
     await _eaService.initialize();
+    
+    if (_disposed) return;
     _eaService.startPolling();
 
+    if (_disposed) return;
+    
     // Initialize Relay Connection
     _connection = RelayConnection(
       server: widget.relayServer,
       onStatusChanged: (status) {
-        setState(() => _status = status);
+        if (!_disposed && mounted) {
+          setState(() => _status = status);
+        }
       },
       onPairingStatusChanged: (mobileConnected, deviceName) {
+        if (_disposed || !mounted) return;
         setState(() {
           // Only update device name if provided
           if (deviceName != null && deviceName.isNotEmpty) {
@@ -79,14 +94,20 @@ class _HomeScreenState extends State<HomeScreen> {
         // Don't log disconnects here - relay sends disconnect when app is backgrounded
         // We only want to log when user manually disconnects or creates new room
       },
-      onMessageReceived: _handleMessage,
-      onLog: _addLog,
+      onMessageReceived: (msg) {
+        if (!_disposed) _handleMessage(msg);
+      },
+      onLog: (msg) {
+        if (!_disposed) _addLog(msg);
+      },
     );
 
+    if (_disposed) return;
     await _createRoomAndConnect();
   }
 
   Future<void> _createRoomAndConnect() async {
+    if (_disposed || !mounted) return;
     setState(() => _status = ConnectionStatus.connecting);
 
     try {

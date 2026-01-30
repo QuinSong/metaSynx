@@ -2,7 +2,7 @@ import os
 import time
 
 
-msg = 'starting with firebase auth 4'
+msg = 'added firebase auth sign in'
 
 
 os.system('git add .')

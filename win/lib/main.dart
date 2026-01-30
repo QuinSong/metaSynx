@@ -65,9 +65,10 @@ class _AuthWrapperState extends State<AuthWrapper> {
         if (snapshot.hasData && snapshot.data != null) {
           final user = snapshot.data!;
 
-          // If we haven't loaded user data yet, show loading
+          // If we haven't loaded user data yet, trigger loading
           if (_relayServer == null && !_isLoadingUserData) {
-            _loadUserData(user);
+            // Defer to avoid setState during build
+            Future.microtask(() => _loadUserData(user));
             return const Scaffold(
               body: Center(
                 child: Column(

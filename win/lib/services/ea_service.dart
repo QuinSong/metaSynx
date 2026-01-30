@@ -8,6 +8,7 @@ class EAService {
   static String? _commonDataPath;
   
   Timer? _pollTimer;
+  bool _disposed = false;
   
   Function(List<Map<String, dynamic>>)? onAccountsUpdated;
   Function(String)? onLog;
@@ -405,7 +406,9 @@ class EAService {
 
   /// Poll for account status updates
   Future<void> _pollAccountStatus() async {
+    if (_disposed) return;
     final accounts = await getAccounts();
+    if (_disposed) return;
     onAccountsUpdated?.call(accounts);
   }
 
@@ -427,6 +430,9 @@ class EAService {
   }
 
   void dispose() {
+    _disposed = true;
     stopPolling();
+    onAccountsUpdated = null;
+    onLog = null;
   }
 }
