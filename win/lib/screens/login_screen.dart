@@ -52,21 +52,21 @@ class _LoginScreenState extends State<LoginScreen> {
       if (isSignedInElsewhere) {
         // Sign out and show error
         await _authService.signOut();
-        setState(() {
-          _errorMessage = 'This account is already signed in on another device. Please sign out there first.';
-          _isLoading = false;
-        });
+        if (mounted) {
+          setState(() {
+            _errorMessage = 'This account is already signed in on another device. Please sign out there first.';
+            _isLoading = false;
+          });
+        }
         return;
       }
       
+      // Success - widget will be replaced by AuthWrapper
       widget.onLoginSuccess();
     } catch (e) {
-      setState(() {
-        _errorMessage = e.toString();
-      });
-    } finally {
       if (mounted) {
         setState(() {
+          _errorMessage = e.toString();
           _isLoading = false;
         });
       }
