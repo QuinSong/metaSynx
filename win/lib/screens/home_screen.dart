@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import '../core/config.dart';
 import '../core/theme.dart';
 import '../services/relay_connection.dart';
 import '../services/room_service.dart';
@@ -7,7 +6,16 @@ import '../services/ea_service.dart';
 import '../components/components.dart';
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  final String relayServer;
+  final String userEmail;
+  final VoidCallback onSignOut;
+
+  const HomeScreen({
+    super.key,
+    required this.relayServer,
+    required this.userEmail,
+    required this.onSignOut,
+  });
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -49,6 +57,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     // Initialize Relay Connection
     _connection = RelayConnection(
+      server: widget.relayServer,
       onStatusChanged: (status) {
         setState(() => _status = status);
       },
@@ -81,11 +90,11 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() => _status = ConnectionStatus.connecting);
 
     try {
-      final credentials = await RoomService.createRoom();
+      final credentials = await RoomService.createRoom(widget.relayServer);
       _roomId = credentials.roomId;
       _roomSecret = credentials.roomSecret;
 
-      _qrData = RoomService.generateQrPayload(_roomId!, _roomSecret!);
+      _qrData = RoomService.generateQrPayload(widget.relayServer, _roomId!, _roomSecret!);
       setState(() {});
 
       await _connection!.connect(_roomId!, _roomSecret!);
@@ -473,11 +482,27 @@ class _HomeScreenState extends State<HomeScreen> {
             padding: const EdgeInsets.all(16),
             child: Column(
               children: [
-                InfoRow(label: 'Server', value: relayServer),
+                InfoRow(label: 'User', value: widget.userEmail),
+                const SizedBox(height: 4),
+                InfoRow(label: 'Server', value: widget.relayServer),
                 const SizedBox(height: 4),
                 InfoRow(label: 'Status', value: _status.name.toUpperCase()),
                 const SizedBox(height: 4),
                 InfoRow(label: 'MT4 Terminals', value: '${_accounts.length} connected'),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: widget.onSignOut,
+                    icon: const Icon(Icons.logout, size: 18),
+                    label: const Text('Sign Out'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.textSecondary,
+                      side: BorderSide(color: AppColors.border),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                  ),
+                ),
               ],
             ),
           ),

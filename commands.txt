@@ -30,6 +30,9 @@ curl https://server1.metasynx.io/health
 
 
 
+
+
+
 Trading Communities (Best)
 
 Reddit: r/Forex, r/algotrading, r/metatrader - post "Looking for beta testers for MT4 mobile app"

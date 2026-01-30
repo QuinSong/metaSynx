@@ -27,7 +27,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final relay.RelayConnection _connection = relay.RelayConnection();
   relay.ConnectionState _connectionState = relay.ConnectionState.disconnected;
   bool _bridgeConnected = false;
-  bool _hasSavedConnection = false; // True if we have a saved connection config
+  bool _hasSavedConnection = false;  // True if we have a saved connection config
   String? _roomId;
   final ValueNotifier<List<Map<String, dynamic>>> _accountsNotifier =
       ValueNotifier<List<Map<String, dynamic>>>([]);
@@ -526,7 +526,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     // Clear room ID first to prevent "room expired" error from triggering
     _roomId = null;
     _hasSavedConnection = false;
-
+    
     _connection.disconnect();
     _stopAccountsRefresh();
     final prefs = await SharedPreferences.getInstance();
@@ -567,7 +567,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     final isConnectedToBridge =
-        _connectionState == relay.ConnectionState.connected && _bridgeConnected;
+        _connectionState == relay.ConnectionState.connected &&
+        _bridgeConnected;
 
     // Show accounts view if connected to bridge OR if we have cached accounts (reconnecting)
     final showAccountsView =
@@ -728,7 +729,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     ],
                   );
                 }
-
+                
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -742,8 +743,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         valueListenable: _positionsNotifier,
                         builder: (context, positions, _) {
                           // Sort accounts with main account first
-                          final sortedAccounts =
-                              List<Map<String, dynamic>>.from(accounts);
+                          final sortedAccounts = List<Map<String, dynamic>>.from(
+                            accounts,
+                          );
                           sortedAccounts.sort((a, b) {
                             final aIsMain = a['account'] == _mainAccountNum;
                             final bIsMain = b['account'] == _mainAccountNum;
@@ -780,12 +782,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Widget _buildDisconnectedContent() {
     // When not connected and no cached accounts
     final bottomPadding = MediaQuery.of(context).padding.bottom;
-
+    
     // Show reconnecting card if we have a saved connection but not fully connected
-    final isReconnecting =
-        _hasSavedConnection &&
-        !(_connectionState == relay.ConnectionState.connected &&
-            _bridgeConnected);
+    final isReconnecting = _hasSavedConnection && 
+        !(_connectionState == relay.ConnectionState.connected && _bridgeConnected);
 
     return SafeArea(
       bottom: false, // We'll handle bottom separately for the button
@@ -810,8 +810,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ),
           ),
           const Spacer(),
-          if (_connectionState == relay.ConnectionState.disconnected &&
-              !_hasSavedConnection)
+          if (_connectionState == relay.ConnectionState.disconnected && !_hasSavedConnection)
             Padding(
               padding: EdgeInsets.fromLTRB(24, 24, 24, 24 + bottomPadding),
               child: ScanButton(onPressed: _openScanner),
@@ -944,7 +943,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     return Row(
       children: [
-        Image.asset('assets/logo.png', height: 36),
+        Image.asset(
+          'assets/logo.png',
+          height: 36,
+        ),
         const Spacer(),
         if (showButtons) ...[
           IconButton(
@@ -1322,8 +1324,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     String currency,
     bool isNetPL,
   ) {
-    final isPositive = profit >= 0;
     final plPercent = balance > 0 ? (profit / balance) * 100 : 0.0;
+    final plColor = profit == 0
+        ? Colors.white
+        : (profit > 0 ? AppColors.primary : AppColors.error);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1341,9 +1345,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               Text(
                 '${plPercent.toStringAsFixed(2)}%',
                 style: TextStyle(
-                  color: profit == 0
-                      ? Colors.white
-                      : (profit > 0 ? AppColors.primary : AppColors.error),
+                  color: plColor,
                   fontSize: 11,
                 ),
               ),
@@ -1354,7 +1356,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         Text(
           Formatters.formatCurrencyWithSign(profit),
           style: TextStyle(
-            color: isPositive ? AppColors.primary : AppColors.error,
+            color: plColor,
             fontSize: 14,
             fontWeight: FontWeight.w600,
           ),

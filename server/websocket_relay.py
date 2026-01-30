@@ -29,10 +29,10 @@ from datetime import datetime, timedelta
 # ============================================
 
 API_KEY = "msxkey2026"              # API key for authentication
-ROOM_EXPIRY_MINUTES = 1440          # Room expires after 24 hours of NO activity (bridge disconnected)
+ROOM_EXPIRY_MINUTES = 60              # Room expires after 1 hour of NO activity (bridge disconnected)
 ROOM_CODE_LENGTH = 8                # Length of room codes
 ROOM_SECRET_LENGTH = 16             # Length of room secrets
-MAX_ROOMS_PER_IP = 5                # Prevent abuse
+MAX_ROOMS_PER_IP = 1                  # Prevent abuse
 SERVER_HOST = "server1.metasynx.io" # Server hostname for WebSocket URL
 
 # ============================================

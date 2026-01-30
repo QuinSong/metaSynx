@@ -880,7 +880,10 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
                             const Spacer(),
                             Text(
                               '${lots.toStringAsFixed(2)} lots',
-                              style: AppTextStyles.body,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 14,
+                              ),
                             ),
                           ],
                         ),
@@ -921,14 +924,8 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
                                   ),
                                   Text(
                                     _formatPrice(currentPrice),
-                                    style: TextStyle(
-                                      color: isBuy
-                                          ? (currentPrice >= openPrice
-                                                ? AppColors.primary
-                                                : AppColors.error)
-                                          : (currentPrice <= openPrice
-                                                ? AppColors.primary
-                                                : AppColors.error),
+                                    style: const TextStyle(
+                                      color: Colors.white,
                                       fontSize: 16,
                                       fontWeight: FontWeight.w600,
                                     ),
@@ -972,9 +969,11 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
                                   Text(
                                     Formatters.formatCurrencyWithSign(profit),
                                     style: TextStyle(
-                                      color: profit >= 0
-                                          ? AppColors.primary
-                                          : AppColors.error,
+                                      color: profit == 0
+                                          ? Colors.white
+                                          : (profit > 0
+                                              ? AppColors.primary
+                                              : AppColors.error),
                                       fontSize: 16,
                                       fontWeight: FontWeight.bold,
                                     ),

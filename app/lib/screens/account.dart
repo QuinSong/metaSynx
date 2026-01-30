@@ -386,9 +386,11 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
             Container(
               padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
               decoration: BoxDecoration(
-                color: profit >= 0
-                    ? AppColors.primary.withOpacity(0.1)
-                    : AppColors.error.withOpacity(0.1),
+                color: profit == 0
+                    ? AppColors.surface
+                    : (profit > 0
+                        ? AppColors.primary.withOpacity(0.1)
+                        : AppColors.error.withOpacity(0.1)),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Row(
@@ -404,7 +406,9 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
                       Text(
                         '${Formatters.formatCurrencyWithSign(profit)} $currency',
                         style: TextStyle(
-                          color: profit >= 0 ? AppColors.primary : AppColors.error,
+                          color: profit == 0 
+                              ? Colors.white 
+                              : (profit > 0 ? AppColors.primary : AppColors.error),
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
                         ),
@@ -1275,7 +1279,9 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
                       Text(
                         Formatters.formatCurrencyWithSign(displayProfit),
                         style: TextStyle(
-                          color: displayProfit >= 0 ? AppColors.primary : AppColors.error,
+                          color: displayProfit == 0 
+                              ? Colors.white 
+                              : (displayProfit > 0 ? AppColors.primary : AppColors.error),
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
                         ),

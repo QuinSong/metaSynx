@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import '../core/config.dart';
 
 enum ConnectionStatus {
   disconnected,
@@ -11,6 +10,7 @@ enum ConnectionStatus {
 }
 
 class RelayConnection {
+  final String server;
   final Function(ConnectionStatus) onStatusChanged;
   final Function(bool, String?) onPairingStatusChanged;
   final Function(Map<String, dynamic>) onMessageReceived;
@@ -23,6 +23,7 @@ class RelayConnection {
   bool _intentionalDisconnect = false;
 
   RelayConnection({
+    required this.server,
     required this.onStatusChanged,
     required this.onPairingStatusChanged,
     required this.onMessageReceived,
@@ -36,7 +37,7 @@ class RelayConnection {
     onStatusChanged(ConnectionStatus.connecting);
 
     try {
-      final wsUrl = 'wss://$relayServer/ws/relay/$roomId';
+      final wsUrl = 'wss://$server/ws/relay/$roomId';
 
       _socket = await WebSocket.connect(wsUrl);
 

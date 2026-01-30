@@ -4,9 +4,9 @@ import '../core/config.dart';
 
 class RoomService {
   /// Creates a new relay room and returns room_id and room_secret
-  static Future<RoomCredentials> createRoom() async {
+  static Future<RoomCredentials> createRoom(String server) async {
     final response = await http.post(
-      Uri.parse('https://$relayServer/ws/relay/create-room'),
+      Uri.parse('https://$server/ws/relay/create-room'),
       headers: {
         'x-api-key': apiKey,
         'Content-Type': 'application/json',
@@ -25,9 +25,9 @@ class RoomService {
   }
 
   /// Generates QR code payload
-  static String generateQrPayload(String roomId, String roomSecret) {
+  static String generateQrPayload(String server, String roomId, String roomSecret) {
     final qrPayload = {
-      'server': relayServer,
+      'server': server,
       'room': roomId,
       'secret': roomSecret,
       'v': 2,

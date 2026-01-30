@@ -2,7 +2,7 @@ import os
 import time
 
 
-msg = 'Chart cleanup fixed'
+msg = 'starting with firebase auth 1'
 
 
 os.system('git add .')
