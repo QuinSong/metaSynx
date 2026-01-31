@@ -3,6 +3,7 @@ import '../core/theme.dart';
 import '../services/relay_connection.dart';
 import '../services/room_service.dart';
 import '../services/ea_service.dart';
+import '../services/user_service.dart';
 import '../components/components.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -24,6 +25,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   RelayConnection? _connection;
   final EAService _eaService = EAService();
+  final UserService _userService = UserService();
   ConnectionStatus _status = ConnectionStatus.disconnected;
   String? _roomId;
   String? _roomSecret;
@@ -43,6 +45,10 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     _disposed = true;
+    // Decrement activeRooms if mobile was connected
+    if (_mobileHasConnected) {
+      _userService.decrementActiveRooms(widget.relayServer);
+    }
     _connection?.disconnect();
     _eaService.dispose();
     super.dispose();
@@ -88,6 +94,8 @@ class _HomeScreenState extends State<HomeScreen> {
             _mobileHasConnected = true;
             // Only log on first connect
             _addLog('📱 Mobile connected: $deviceName');
+            // Increment activeRooms when mobile connects
+            _userService.incrementActiveRooms(widget.relayServer);
           }
         });
         
@@ -136,6 +144,10 @@ class _HomeScreenState extends State<HomeScreen> {
       case 'manual_disconnect':
         // User manually disconnected from the app - show QR code again
         _addLog('📱 Mobile disconnected');
+        // Decrement activeRooms since mobile disconnected
+        if (_mobileHasConnected) {
+          _userService.decrementActiveRooms(widget.relayServer);
+        }
         setState(() {
           _mobileHasConnected = false;  // Reset so QR shows
           _mobileDeviceName = null;
@@ -387,9 +399,10 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _regenerateRoom() async {
-    // Log disconnect if mobile was connected
+    // Log disconnect and decrement activeRooms if mobile was connected
     if (_mobileHasConnected) {
       _addLog('📱 Mobile disconnected');
+      _userService.decrementActiveRooms(widget.relayServer);
     }
     
     _connection?.disconnect();

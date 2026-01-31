@@ -112,4 +112,26 @@ class UserService {
       return null;
     }
   }
+
+  /// Increment activeRooms for a server (call when mobile connects)
+  Future<void> incrementActiveRooms(String server) async {
+    try {
+      await _firestore.collection('serverStats').doc(server).update({
+        'activeRooms': FieldValue.increment(1),
+      });
+    } catch (e) {
+      debugPrint('Error incrementing activeRooms: $e');
+    }
+  }
+
+  /// Decrement activeRooms for a server (call when new room created/mobile disconnected)
+  Future<void> decrementActiveRooms(String server) async {
+    try {
+      await _firestore.collection('serverStats').doc(server).update({
+        'activeRooms': FieldValue.increment(-1),
+      });
+    } catch (e) {
+      debugPrint('Error decrementing activeRooms: $e');
+    }
+  }
 }
