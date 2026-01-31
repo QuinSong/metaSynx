@@ -12,7 +12,7 @@ class AccountDetailScreen extends StatefulWidget {
   final void Function(int ticket, int terminalIndex, [double? lots]) onClosePosition;
   final void Function(int ticket, int terminalIndex, double? sl, double? tp) onModifyPosition;
   final void Function(int ticket, int terminalIndex) onCancelOrder;
-  final void Function(int ticket, int terminalIndex, double price) onModifyPendingOrder;
+  final void Function(int ticket, int terminalIndex, double price, {double? sl, double? tp}) onModifyPendingOrder;
   final Map<String, String> accountNames;
   final String? mainAccountNum;
   final bool includeCommissionSwap;
@@ -249,12 +249,75 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
     return counts;
   }
 
+  /// Check if a position is hedged and should show the hedge indicator
+  bool _isHedgedPosition(Map<String, dynamic> position, List<Map<String, dynamic>> allPositions) {
+    final symbol = position['symbol'] as String? ?? '';
+    final ticket = position['ticket'] as int? ?? 0;
+    
+    // Get all positions for this symbol (excluding pending orders)
+    final symbolPositions = allPositions.where((p) {
+      final pType = (p['type'] as String?)?.toLowerCase() ?? '';
+      return p['symbol'] == symbol && !pType.contains('limit') && !pType.contains('stop');
+    }).toList();
+    
+    // Separate buy and sell positions
+    final buyPositions = <Map<String, dynamic>>[];
+    final sellPositions = <Map<String, dynamic>>[];
+    
+    for (final p in symbolPositions) {
+      final pType = (p['type'] as String?)?.toLowerCase() ?? '';
+      
+      if (pType.contains('buy')) {
+        buyPositions.add(p);
+      } else if (pType.contains('sell')) {
+        sellPositions.add(p);
+      }
+    }
+    
+    // No hedge if only one direction
+    if (buyPositions.isEmpty || sellPositions.isEmpty) return false;
+    
+    // Sort both lists by lots descending to match largest first
+    buyPositions.sort((a, b) => ((b['lots'] as num?)?.toDouble() ?? 0)
+        .compareTo((a['lots'] as num?)?.toDouble() ?? 0));
+    sellPositions.sort((a, b) => ((b['lots'] as num?)?.toDouble() ?? 0)
+        .compareTo((a['lots'] as num?)?.toDouble() ?? 0));
+    
+    // Track which positions are hedged
+    final hedgedTickets = <int>{};
+    final usedBuyIndices = <int>{};
+    final usedSellIndices = <int>{};
+    
+    // Match positions with same lot size
+    for (int i = 0; i < buyPositions.length; i++) {
+      if (usedBuyIndices.contains(i)) continue;
+      final buyLot = (buyPositions[i]['lots'] as num?)?.toDouble() ?? 0;
+      
+      for (int j = 0; j < sellPositions.length; j++) {
+        if (usedSellIndices.contains(j)) continue;
+        final sellLot = (sellPositions[j]['lots'] as num?)?.toDouble() ?? 0;
+        
+        if ((buyLot - sellLot).abs() < 0.0001) {
+          // Found a hedge pair
+          hedgedTickets.add(buyPositions[i]['ticket'] as int? ?? 0);
+          hedgedTickets.add(sellPositions[j]['ticket'] as int? ?? 0);
+          usedBuyIndices.add(i);
+          usedSellIndices.add(j);
+          break;
+        }
+      }
+    }
+    
+    return hedgedTickets.contains(ticket);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
-        backgroundColor: AppColors.background,
+        backgroundColor: AppColors.surface,
+        elevation: 0,
         title: ValueListenableBuilder<List<Map<String, dynamic>>>(
           valueListenable: widget.accountsNotifier,
           builder: (context, _, __) {
@@ -263,7 +326,11 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
             final displayName = _getAccountDisplayName(accountNum);
             return Text(
               displayName,
-              style: const TextStyle(color: Colors.white),
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+              ),
             );
           },
         ),
@@ -292,7 +359,7 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
                 final pairCounts = _getPairCounts();
                 final pendingOrders = _getPendingOrders();
                 return SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                  padding: const EdgeInsets.all(16),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -821,6 +888,8 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
     final ticket = order['ticket'] as int? ?? 0;
     final symbol = order['symbol'] as String? ?? '';
     final openPrice = (order['openPrice'] as num?)?.toDouble() ?? 0;
+    final currentSl = (order['sl'] as num?)?.toDouble() ?? 0;
+    final currentTp = (order['tp'] as num?)?.toDouble() ?? 0;
     final digits = _detectDigits(openPrice);
     
     // Find similar orders across all accounts
@@ -828,6 +897,8 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
     final selectedOrders = <int>{ticket};  // Pre-select current order
     
     final priceController = TextEditingController(text: openPrice.toStringAsFixed(digits));
+    final slController = TextEditingController(text: currentSl > 0 ? currentSl.toStringAsFixed(digits) : '');
+    final tpController = TextEditingController(text: currentTp > 0 ? currentTp.toStringAsFixed(digits) : '');
     
     showDialog(
       context: context,
@@ -906,7 +977,7 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
                     );
                   }),
                   const SizedBox(height: 16),
-                  const Text('New Price', style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+                  const Text('Price', style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
                   const SizedBox(height: 8),
                   TextField(
                     controller: priceController,
@@ -922,6 +993,62 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
                       contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
                     ),
                     autofocus: similarOrders.length == 1,
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('SL', style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+                            const SizedBox(height: 8),
+                            TextField(
+                              controller: slController,
+                              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                              style: const TextStyle(color: Colors.white),
+                              decoration: InputDecoration(
+                                hintText: 'Optional',
+                                hintStyle: TextStyle(color: AppColors.textSecondary.withOpacity(0.5)),
+                                filled: true,
+                                fillColor: AppColors.background,
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  borderSide: BorderSide.none,
+                                ),
+                                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('TP', style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+                            const SizedBox(height: 8),
+                            TextField(
+                              controller: tpController,
+                              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                              style: const TextStyle(color: Colors.white),
+                              decoration: InputDecoration(
+                                hintText: 'Optional',
+                                hintStyle: TextStyle(color: AppColors.textSecondary.withOpacity(0.5)),
+                                filled: true,
+                                fillColor: AppColors.background,
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  borderSide: BorderSide.none,
+                                ),
+                                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -944,6 +1071,10 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
                   );
                   return;
                 }
+                
+                final newSl = slController.text.isEmpty ? null : double.tryParse(slController.text);
+                final newTp = tpController.text.isEmpty ? null : double.tryParse(tpController.text);
+                
                 Navigator.pop(context);
                 
                 // Modify all selected orders
@@ -951,7 +1082,7 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
                   final oTicket = o['ticket'] as int? ?? 0;
                   if (selectedOrders.contains(oTicket)) {
                     final oTerminalIndex = o['terminalIndex'] as int? ?? 0;
-                    widget.onModifyPendingOrder(oTicket, oTerminalIndex, newPrice);
+                    widget.onModifyPendingOrder(oTicket, oTerminalIndex, newPrice, sl: newSl, tp: newTp);
                   }
                 }
                 
@@ -1023,7 +1154,7 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
                     color: isSelected 
                         ? AppColors.primaryWithOpacity(0.2) 
                         : AppColors.surface,
-                    borderRadius: BorderRadius.circular(16),
+                    borderRadius: BorderRadius.circular(8),
                     border: Border.all(
                       color: isSelected ? AppColors.primary : AppColors.border,
                     ),
@@ -1133,128 +1264,113 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
     final plPercent = balance > 0 ? (displayProfit / balance) * 100 : 0.0;
     
     final isExpanded = _expandedPositions.contains(ticket);
+    
+    // Check if this position is hedged
+    final isHedged = _isHedgedPosition(position, _getMarketPositions());
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: IntrinsicHeight(
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => _openPositionDetail(position),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Left side - tap to expand/collapse (covers full height)
-            Expanded(
-              flex: 3,
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () {
-                  setState(() {
-                    if (isExpanded) {
-                      _expandedPositions.remove(ticket);
-                    } else {
-                      _expandedPositions.add(ticket);
-                    }
-                  });
-                },
-                child: Padding(
-                  padding: const EdgeInsets.only(left: 16, top: 16, bottom: 16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+            // Header row
+            Row(
+              children: [
+                // Tap on symbol + type to expand/collapse
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () {
+                    setState(() {
+                      if (isExpanded) {
+                        _expandedPositions.remove(ticket);
+                      } else {
+                        _expandedPositions.add(ticket);
+                      }
+                    });
+                  },
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      // Header left: Symbol + Type
-                      Row(
-                        children: [
-                          Text(
-                            symbol,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: isBuy ? AppColors.primary : AppColors.error,
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Text(
-                              _formatOrderType(type),
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                        ],
+                      Text(
+                        symbol,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
-                      const SizedBox(height: 12),
-                      // Prices left: Open + Current
-                      Row(
-                        children: [
-                          Expanded(
-                            child: _buildPriceItem('Open', openPrice.toStringAsFixed(digits)),
+                      const SizedBox(width: 12),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: isBuy ? AppColors.primary : AppColors.error,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          _formatOrderType(type),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
                           ),
-                          Expanded(
-                            child: _buildPriceItem('Current', currentPrice.toStringAsFixed(digits)),
-                          ),
-                        ],
+                        ),
                       ),
-                      // Expanded content
-                      if (isExpanded) ...[
-                        const SizedBox(height: 12),
-                        const Divider(color: AppColors.border, height: 1),
-                        const SizedBox(height: 12),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: _buildPriceItem('SL', sl > 0 ? sl.toStringAsFixed(digits) : '-'),
-                            ),
-                            Expanded(
-                              child: _buildPriceItem('TP', tp > 0 ? tp.toStringAsFixed(digits) : '-'),
-                            ),
-                          ],
+                      // Hedge indicator
+                      if (isHedged) ...[
+                        const SizedBox(width: 10),
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration: const BoxDecoration(
+                            color: Colors.orange,
+                            shape: BoxShape.circle,
+                          ),
                         ),
                       ],
                     ],
                   ),
                 ),
-              ),
+                const Spacer(),
+                // Lots + chevron
+                Text(
+                  '${lots.toStringAsFixed(2)} lots',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Icon(
+                  isExpanded ? Icons.expand_less : Icons.chevron_right,
+                  color: AppColors.textSecondary,
+                  size: 22,
+                ),
+              ],
             ),
-            // Right side - tap to go to detail (covers full height)
-            Expanded(
-              flex: 2,
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () => _openPositionDetail(position),
-                child: Padding(
-                  padding: const EdgeInsets.only(right: 16, top: 16, bottom: 16),
+            const SizedBox(height: 12),
+            // Prices and P/L row
+            Row(
+              children: [
+                Expanded(
+                  child: _buildPriceItem('Open', openPrice.toStringAsFixed(digits)),
+                ),
+                Expanded(
+                  child: _buildPriceItem('Current', currentPrice.toStringAsFixed(digits)),
+                ),
+                Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
-                      // Header right: Lots + Chevron
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.end,
-                        children: [
-                          Text(
-                            '${lots.toStringAsFixed(2)} lots',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 14,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                          const SizedBox(width: 4),
-                          const Icon(Icons.chevron_right, color: AppColors.textSecondary, size: 22),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      // P/L section
                       Row(
                         mainAxisAlignment: MainAxisAlignment.end,
                         children: [
@@ -1286,11 +1402,28 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
                           fontWeight: FontWeight.bold,
                         ),
                       ),
-                      // Expanded content right side
-                      if (isExpanded) ...[
-                        const SizedBox(height: 12),
-                        const Divider(color: AppColors.border, height: 1),
-                        const SizedBox(height: 12),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            // Expanded content
+            if (isExpanded) ...[
+              const SizedBox(height: 12),
+              const Divider(color: AppColors.border, height: 1),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: _buildPriceItem('SL', sl > 0 ? sl.toStringAsFixed(digits) : '-'),
+                  ),
+                  Expanded(
+                    child: _buildPriceItem('TP', tp > 0 ? tp.toStringAsFixed(digits) : '-'),
+                  ),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
                         Text(
                           openTime,
                           style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
@@ -1300,11 +1433,11 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
                           style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
                         ),
                       ],
-                    ],
+                    ),
                   ),
-                ),
+                ],
               ),
-            ),
+            ],
           ],
         ),
       ),

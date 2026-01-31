@@ -5,6 +5,8 @@ flutter run -d windows
 
 rm -r -fo metaSynx; git clone git@github.com:QuinSong/metaSynx.git; cd metaSynx/win; flutter run -d windows
 
+flutter build windows --release
+
 
 sudo apt update
 sudo apt install -y python3-pip

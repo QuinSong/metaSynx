@@ -12,7 +12,7 @@ class PositionDetailScreen extends StatefulWidget {
   final void Function(int ticket, int terminalIndex, double? sl, double? tp)
   onModifyPosition;
   final void Function(int ticket, int terminalIndex) onCancelOrder;
-  final void Function(int ticket, int terminalIndex, double price)
+  final void Function(int ticket, int terminalIndex, double price, {double? sl, double? tp})
   onModifyPendingOrder;
   final Map<String, String> accountNames;
   final String? mainAccountNum;
@@ -184,6 +184,21 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
         _initialized = true;
       });
     } else if (_initialized) {
+      // Check if all positions have closed
+      if (matching.isEmpty) {
+        // Position(s) closed - navigate back with notification
+        if (mounted) {
+          Navigator.pop(context);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Position closed'),
+              backgroundColor: AppColors.primary,
+            ),
+          );
+        }
+        return;
+      }
+      
       // Add any new terminals that appear (but don't remove deselected ones)
       final newTerminals = currentTerminals.difference(_knownTerminalIndices);
       if (newTerminals.isNotEmpty) {
@@ -702,10 +717,15 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
-        backgroundColor: AppColors.background,
+        backgroundColor: AppColors.surface,
+        elevation: 0,
         title: Text(
           'Position - $accountDisplayName',
-          style: const TextStyle(color: Colors.white),
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+          ),
         ),
         leading: IconButton(
           icon: const Icon(Icons.chevron_left, color: Colors.white),
@@ -753,6 +773,8 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
                 ? rawProfit + swap + commission
                 : rawProfit;
             final isBuy = type.toLowerCase() == 'buy';
+            final ticket = currentPos['ticket'] as int? ?? 0;
+            final openTime = currentPos['openTime'] as String? ?? '';
 
             // Get account balance for P/L %
             final posTerminalIndex = currentPos['terminalIndex'] as int? ?? -1;
@@ -821,7 +843,7 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
             });
 
             return SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+              padding: const EdgeInsets.all(16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -883,6 +905,27 @@ class _PositionDetailScreenState extends State<PositionDetailScreen> {
                               style: const TextStyle(
                                 color: Colors.white,
                                 fontSize: 14,
+                              ),
+                            ),
+                          ],
+                        ),
+                        // Date on left, ticket on right
+                        const SizedBox(height: 4),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              openTime.isNotEmpty ? openTime : '',
+                              style: const TextStyle(
+                                color: AppColors.textSecondary,
+                                fontSize: 11,
+                              ),
+                            ),
+                            Text(
+                              '#$ticket',
+                              style: const TextStyle(
+                                color: AppColors.textSecondary,
+                                fontSize: 11,
                               ),
                             ),
                           ],

@@ -6,13 +6,17 @@ import '../../core/theme.dart';
 class AccountNamesScreen extends StatefulWidget {
   final List<Map<String, dynamic>> accounts;
   final Map<String, String> accountNames;
+  final Set<String> hiddenAccounts;
   final Function(Map<String, String>) onNamesUpdated;
+  final Function(Set<String>) onHiddenAccountsUpdated;
 
   const AccountNamesScreen({
     super.key,
     required this.accounts,
     required this.accountNames,
+    required this.hiddenAccounts,
     required this.onNamesUpdated,
+    required this.onHiddenAccountsUpdated,
   });
 
   @override
@@ -22,13 +26,15 @@ class AccountNamesScreen extends StatefulWidget {
 class _AccountNamesScreenState extends State<AccountNamesScreen> {
   late Map<String, TextEditingController> _controllers;
   late Map<String, String> _names;
+  late Set<String> _hiddenAccounts;
 
   @override
   void initState() {
     super.initState();
     _names = Map.from(widget.accountNames);
+    _hiddenAccounts = Set.from(widget.hiddenAccounts);
     _controllers = {};
-    
+
     for (final account in widget.accounts) {
       final accountNum = account['account'] as String? ?? '';
       final currentName = _names[accountNum] ?? '';
@@ -59,14 +65,16 @@ class _AccountNamesScreenState extends State<AccountNamesScreen> {
     // Save to SharedPreferences
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('account_names', jsonEncode(_names));
+    await prefs.setStringList('hidden_accounts', _hiddenAccounts.toList());
 
     // Notify parent
     widget.onNamesUpdated(_names);
+    widget.onHiddenAccountsUpdated(_hiddenAccounts);
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Account names saved'),
+          content: Text('Account settings saved'),
           backgroundColor: AppColors.primary,
         ),
       );
@@ -74,13 +82,31 @@ class _AccountNamesScreenState extends State<AccountNamesScreen> {
     }
   }
 
+  void _toggleVisibility(String accountNum) {
+    setState(() {
+      if (_hiddenAccounts.contains(accountNum)) {
+        _hiddenAccounts.remove(accountNum);
+      } else {
+        _hiddenAccounts.add(accountNum);
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
-        backgroundColor: AppColors.background,
-        title: const Text('Account Names', style: TextStyle(color: Colors.white)),
+        backgroundColor: AppColors.surface,
+        elevation: 0,
+        title: const Text(
+          'Account Names',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
         leading: IconButton(
           icon: const Icon(Icons.chevron_left, color: Colors.white),
           onPressed: () => Navigator.pop(context),
@@ -102,10 +128,7 @@ class _AccountNamesScreenState extends State<AccountNamesScreen> {
         top: false, // AppBar handles top
         child: widget.accounts.isEmpty
             ? const Center(
-                child: Text(
-                  'No accounts connected',
-                  style: AppTextStyles.body,
-                ),
+                child: Text('No accounts connected', style: AppTextStyles.body),
               )
             : ListView.builder(
                 padding: const EdgeInsets.all(16),
@@ -113,6 +136,7 @@ class _AccountNamesScreenState extends State<AccountNamesScreen> {
                 itemBuilder: (context, index) {
                   final account = widget.accounts[index];
                   final accountNum = account['account'] as String? ?? '';
+                  final accountName = account['name'] as String? ?? '';
                   final broker = account['broker'] as String? ?? '';
                   final server = account['server'] as String? ?? '';
 
@@ -128,114 +152,174 @@ class _AccountNamesScreenState extends State<AccountNamesScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Container(
-                            width: 40,
-                            height: 40,
-                            decoration: BoxDecoration(
-                              color: AppColors.primaryWithOpacity(0.2),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Center(
-                              child: Text(
-                                '${index + 1}',
-                                style: const TextStyle(
-                                  color: AppColors.primary,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 16,
+                              width: 40,
+                              height: 40,
+                              decoration: BoxDecoration(
+                                color: AppColors.primaryWithOpacity(0.2),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Center(
+                                child: Text(
+                                  '${index + 1}',
+                                  style: const TextStyle(
+                                    color: AppColors.primary,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 16,
+                                  ),
                                 ),
                               ),
                             ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  accountNum,
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.bold,
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    accountNum,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                    ),
                                   ),
-                                ),
-                                Text(
-                                  broker,
-                                  style: const TextStyle(
-                                    color: AppColors.textSecondary,
-                                    fontSize: 12,
+                                  if (accountName.isNotEmpty)
+                                    Text(
+                                      accountName,
+                                      style: const TextStyle(
+                                        color: AppColors.textSecondary,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  Text(
+                                    broker,
+                                    style: const TextStyle(
+                                      color: AppColors.textMuted,
+                                      fontSize: 11,
+                                    ),
                                   ),
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      const Text(
-                        'Display Name',
-                        style: TextStyle(
-                          color: AppColors.textSecondary,
-                          fontSize: 12,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      TextField(
-                        controller: _controllers[accountNum],
-                        style: const TextStyle(color: Colors.white),
-                        decoration: InputDecoration(
-                          hintText: 'Enter custom name (optional)',
-                          hintStyle: TextStyle(
-                            color: AppColors.textSecondary.withOpacity(0.5),
-                          ),
-                          filled: true,
-                          fillColor: AppColors.background,
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            borderSide: const BorderSide(color: AppColors.border),
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            borderSide: const BorderSide(color: AppColors.border),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            borderSide: const BorderSide(color: AppColors.primary),
-                          ),
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 12,
-                          ),
-                          suffixIcon: _controllers[accountNum]?.text.isNotEmpty == true
-                              ? IconButton(
-                                  icon: const Icon(
-                                    Icons.clear,
-                                    color: AppColors.textSecondary,
-                                    size: 18,
+                            // Show checkbox on far right
+                            GestureDetector(
+                              onTap: () => _toggleVisibility(accountNum),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Text(
+                                    'Show',
+                                    style: TextStyle(
+                                      color: AppColors.textSecondary,
+                                      fontSize: 12,
+                                    ),
                                   ),
-                                  onPressed: () {
-                                    _controllers[accountNum]?.clear();
-                                    setState(() {});
-                                  },
-                                )
-                              : null,
+                                  const SizedBox(width: 8),
+                                  Container(
+                                    width: 20,
+                                    height: 20,
+                                    decoration: BoxDecoration(
+                                      color:
+                                          !_hiddenAccounts.contains(accountNum)
+                                          ? AppColors.primary
+                                          : Colors.transparent,
+                                      borderRadius: BorderRadius.circular(4),
+                                      border: Border.all(
+                                        color:
+                                            !_hiddenAccounts.contains(
+                                              accountNum,
+                                            )
+                                            ? AppColors.primary
+                                            : AppColors.textSecondary,
+                                      ),
+                                    ),
+                                    child: !_hiddenAccounts.contains(accountNum)
+                                        ? const Icon(
+                                            Icons.check,
+                                            size: 16,
+                                            color: Colors.black,
+                                          )
+                                        : null,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
                         ),
-                        onChanged: (_) => setState(() {}),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Server: $server',
-                        style: const TextStyle(
-                          color: AppColors.textMuted,
-                          fontSize: 11,
+                        const SizedBox(height: 16),
+                        const Text(
+                          'Display Name',
+                          style: TextStyle(
+                            color: AppColors.textSecondary,
+                            fontSize: 12,
+                          ),
                         ),
-                      ),
-                    ],
-                  ),
-                );
-              },
-            ),
+                        const SizedBox(height: 6),
+                        TextField(
+                          controller: _controllers[accountNum],
+                          style: const TextStyle(color: Colors.white),
+                          decoration: InputDecoration(
+                            hintText: 'Enter custom name (optional)',
+                            hintStyle: TextStyle(
+                              color: AppColors.textSecondary.withOpacity(0.5),
+                            ),
+                            filled: true,
+                            fillColor: AppColors.background,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: const BorderSide(
+                                color: AppColors.border,
+                              ),
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: const BorderSide(
+                                color: AppColors.border,
+                              ),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: const BorderSide(
+                                color: AppColors.primary,
+                              ),
+                            ),
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 12,
+                            ),
+                            suffixIcon:
+                                _controllers[accountNum]?.text.isNotEmpty ==
+                                    true
+                                ? IconButton(
+                                    icon: const Icon(
+                                      Icons.clear,
+                                      color: AppColors.textSecondary,
+                                      size: 18,
+                                    ),
+                                    onPressed: () {
+                                      _controllers[accountNum]?.clear();
+                                      setState(() {});
+                                    },
+                                  )
+                                : null,
+                          ),
+                          onChanged: (_) => setState(() {}),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Server: $server',
+                          style: const TextStyle(
+                            color: AppColors.textMuted,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
       ),
     );
   }

@@ -4,15 +4,17 @@
 //|                                                                  |
 //+------------------------------------------------------------------+
 #property copyright "MetaSynx"
-#property link      ""
-#property version   "2.10"
+#property link      "https://metasynx.io"
+#property version   "2.00"
 #property strict
+#property description "MetaSynx Bridge Client - Connect MT4 to MetaSynx mobile app"
+#property icon       "\\Images\\logoIcon.ico"
 
 //+------------------------------------------------------------------+
-//| Configuration                                                     |
+//| Configuration (internal - not user configurable)                  |
 //+------------------------------------------------------------------+
-input string   BridgeFolder = "MetaSynx";  // Folder for bridge communication
-input int      UpdateIntervalMs = 500;      // Update interval in milliseconds
+const string   BridgeFolder = "MetaSynx";
+const int      UpdateIntervalMs = 500;
 
 //+------------------------------------------------------------------+
 //| Global Variables                                                  |
@@ -458,8 +460,12 @@ void ProcessCommand(string jsonCommand)
    {
       int ticket = (int)StringToInteger(ExtractJsonString(jsonCommand, "ticket"));
       double price = StringToDouble(ExtractJsonString(jsonCommand, "price"));
-      Print("MODIFY PENDING COMMAND: ticket=", ticket, " price=", price);
-      ModifyPendingOrder(ticket, price);
+      string slStr = ExtractJsonString(jsonCommand, "sl");
+      string tpStr = ExtractJsonString(jsonCommand, "tp");
+      double sl = (slStr != "") ? StringToDouble(slStr) : -1;
+      double tp = (tpStr != "") ? StringToDouble(tpStr) : -1;
+      Print("MODIFY PENDING COMMAND: ticket=", ticket, " price=", price, " sl=", sl, " tp=", tp);
+      ModifyPendingOrder(ticket, price, sl, tp);
    }
    else if(action == "get_symbol_info")
    {
@@ -831,9 +837,9 @@ void CancelPendingOrder(int ticket)
 }
 
 //+------------------------------------------------------------------+
-//| Modify pending order price                                         |
+//| Modify pending order price, sl, tp                                |
 //+------------------------------------------------------------------+
-void ModifyPendingOrder(int ticket, double newPrice)
+void ModifyPendingOrder(int ticket, double newPrice, double newSl = -1, double newTp = -1)
 {
    if(!OrderSelect(ticket, SELECT_BY_TICKET))
    {
@@ -860,9 +866,13 @@ void ModifyPendingOrder(int ticket, double newPrice)
    int digits = (int)MarketInfo(OrderSymbol(), MODE_DIGITS);
    newPrice = NormalizeDouble(newPrice, digits);
    
-   Print("MODIFY PENDING: ticket=", ticket, " newPrice=", newPrice);
+   // Use existing SL/TP if not provided (-1 means keep existing)
+   double sl = (newSl >= 0) ? NormalizeDouble(newSl, digits) : OrderStopLoss();
+   double tp = (newTp >= 0) ? NormalizeDouble(newTp, digits) : OrderTakeProfit();
    
-   bool result = OrderModify(ticket, newPrice, OrderStopLoss(), OrderTakeProfit(), 0, clrBlue);
+   Print("MODIFY PENDING: ticket=", ticket, " newPrice=", newPrice, " sl=", sl, " tp=", tp);
+   
+   bool result = OrderModify(ticket, newPrice, sl, tp, 0, clrBlue);
    
    if(result)
    {

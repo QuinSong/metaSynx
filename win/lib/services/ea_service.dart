@@ -226,13 +226,16 @@ class EAService {
     });
   }
 
-  /// Modify pending order price
-  Future<bool> modifyPendingOrder(int ticket, int terminalIndex, double price) async {
-    return await sendCommandToTerminal(terminalIndex, {
+  /// Modify pending order price, sl, tp
+  Future<bool> modifyPendingOrder(int ticket, int terminalIndex, double price, {double? sl, double? tp}) async {
+    final command = <String, dynamic>{
       'action': 'modify_pending',
       'ticket': ticket,
       'price': price,
-    });
+    };
+    if (sl != null) command['sl'] = sl;
+    if (tp != null) command['tp'] = tp;
+    return await sendCommandToTerminal(terminalIndex, command);
   }
 
   /// Get symbol info for risk calculator

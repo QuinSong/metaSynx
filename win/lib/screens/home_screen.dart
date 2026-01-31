@@ -328,12 +328,14 @@ class _HomeScreenState extends State<HomeScreen> {
     final ticket = message['ticket'] as int?;
     final terminalIndex = message['terminalIndex'] as int?;
     final price = (message['price'] as num?)?.toDouble();
+    final sl = (message['sl'] as num?)?.toDouble();
+    final tp = (message['tp'] as num?)?.toDouble();
     
     if (ticket == null || terminalIndex == null || price == null) return;
     
     final accountName = _getAccountName(terminalIndex);
     _addLog('✏️ Modify pending #$ticket @ $price → $accountName');
-    await _eaService.modifyPendingOrder(ticket, terminalIndex, price);
+    await _eaService.modifyPendingOrder(ticket, terminalIndex, price, sl: sl, tp: tp);
   }
 
   void _handleGetChartData(Map<String, dynamic> message) {

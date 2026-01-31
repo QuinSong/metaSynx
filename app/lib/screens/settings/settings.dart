@@ -9,6 +9,7 @@ import 'preferred_symbols.dart';
 class SettingsScreen extends StatefulWidget {
   final List<Map<String, dynamic>> accounts;
   final Map<String, String> accountNames;
+  final Set<String> hiddenAccounts;
   final String? mainAccountNum;
   final Map<String, double> lotRatios;
   final Map<String, String> symbolSuffixes;
@@ -17,6 +18,7 @@ class SettingsScreen extends StatefulWidget {
   final bool showPLPercent;
   final bool confirmBeforeClose;
   final Function(Map<String, String>) onNamesUpdated;
+  final Function(Set<String>) onHiddenAccountsUpdated;
   final Function(String?) onMainAccountUpdated;
   final Function(Map<String, double>) onLotRatiosUpdated;
   final Function(Map<String, String>) onSymbolSuffixesUpdated;
@@ -29,6 +31,7 @@ class SettingsScreen extends StatefulWidget {
     super.key,
     required this.accounts,
     required this.accountNames,
+    required this.hiddenAccounts,
     required this.mainAccountNum,
     required this.lotRatios,
     required this.symbolSuffixes,
@@ -37,6 +40,7 @@ class SettingsScreen extends StatefulWidget {
     required this.showPLPercent,
     required this.confirmBeforeClose,
     required this.onNamesUpdated,
+    required this.onHiddenAccountsUpdated,
     required this.onMainAccountUpdated,
     required this.onLotRatiosUpdated,
     required this.onSymbolSuffixesUpdated,
@@ -52,6 +56,7 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   late Map<String, String> _accountNames;
+  late Set<String> _hiddenAccounts;
   late String? _mainAccountNum;
   late Map<String, double> _lotRatios;
   late Map<String, String> _symbolSuffixes;
@@ -64,6 +69,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void initState() {
     super.initState();
     _accountNames = Map.from(widget.accountNames);
+    _hiddenAccounts = Set.from(widget.hiddenAccounts);
     _mainAccountNum = widget.mainAccountNum;
     _lotRatios = Map.from(widget.lotRatios);
     _symbolSuffixes = Map.from(widget.symbolSuffixes);
@@ -77,11 +83,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() {
       _includeCommissionSwap = value;
     });
-    
+
     // Save to prefs
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('include_commission_swap', value);
-    
+
     // Notify parent
     widget.onIncludeCommissionSwapUpdated(value);
   }
@@ -90,11 +96,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() {
       _confirmBeforeClose = value;
     });
-    
+
     // Save to prefs
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('confirm_before_close', value);
-    
+
     // Notify parent
     widget.onConfirmBeforeCloseUpdated(value);
   }
@@ -103,11 +109,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() {
       _showPLPercent = value;
     });
-    
+
     // Save to prefs
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('show_pl_percent', value);
-    
+
     // Notify parent
     widget.onShowPLPercentUpdated(value);
   }
@@ -119,11 +125,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
         builder: (context) => AccountNamesScreen(
           accounts: widget.accounts,
           accountNames: _accountNames,
+          hiddenAccounts: _hiddenAccounts,
           onNamesUpdated: (names) {
             setState(() {
               _accountNames = names;
             });
             widget.onNamesUpdated(names);
+          },
+          onHiddenAccountsUpdated: (hidden) {
+            setState(() {
+              _hiddenAccounts = hidden;
+            });
+            widget.onHiddenAccountsUpdated(hidden);
           },
         ),
       ),
@@ -218,251 +231,308 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
-        backgroundColor: AppColors.background,
+        backgroundColor: AppColors.surface,
+        elevation: 0,
         automaticallyImplyLeading: false,
-        title: const Text('Settings', style: TextStyle(color: Colors.white)),
+        title: const Text(
+          'Settings',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
       ),
       body: SafeArea(
         top: false, // AppBar handles top
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+          padding: const EdgeInsets.all(16),
           children: [
             // Account Names Card
             _buildNavigationCard(
               icon: Icons.badge_outlined,
               title: 'Account Names',
-              subtitle: '${_getNamedAccountsCount()} of ${widget.accounts.length} accounts named',
+              subtitle:
+                  '${_getNamedAccountsCount()} of ${widget.accounts.length} accounts named',
               onTap: _openAccountNames,
             ),
-            
+
             const SizedBox(height: 12),
-            
+
             // Lot Sizing Card
             _buildNavigationCard(
               icon: Icons.scale_outlined,
               title: 'Lot Sizing',
-              subtitle: _mainAccountNum != null 
+              subtitle: _mainAccountNum != null
                   ? 'Main account: ${_getMainAccountDisplay()}'
                   : 'Configure proportional lot sizes',
               onTap: _openLotSizing,
             ),
-            
-          const SizedBox(height: 12),
-          
-          // Preferred Symbols Card
-          _buildNavigationCard(
-            icon: Icons.currency_exchange_outlined,
-            title: 'Preferred Symbols',
-            subtitle: _getPreferredPairsCount() > 0
-                ? '${_getPreferredPairsCount()} symbol${_getPreferredPairsCount() == 1 ? '' : 's'} selected'
-                : 'Choose symbols for new orders',
-            onTap: _openPreferredPairs,
-          ),
-          
-          const SizedBox(height: 12),
-          
-          // Symbol Suffixes Card
-          _buildNavigationCard(
-            icon: Icons.text_fields_outlined,
-            title: 'Symbol Suffixes',
-            subtitle: _getSuffixesCount() > 0
-                ? '${_getSuffixesCount()} suffix${_getSuffixesCount() == 1 ? '' : 'es'} configured'
-                : 'Add broker symbol suffixes',
-            onTap: _openSymbolSuffixes,
-          ),
-          
-          const SizedBox(height: 12),
-          
-          // Confirm Before Close Checkbox
-          GestureDetector(
-            onTap: () => _toggleConfirmBeforeClose(!_confirmBeforeClose),
-            child: Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: AppColors.surface,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppColors.border),
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    width: 48,
-                    height: 48,
-                    decoration: BoxDecoration(
-                      color: AppColors.primaryWithOpacity(0.15),
-                      borderRadius: BorderRadius.circular(10),
+
+            const SizedBox(height: 12),
+
+            // Preferred Symbols Card
+            _buildNavigationCard(
+              icon: Icons.currency_exchange_outlined,
+              title: 'Preferred Symbols',
+              subtitle: _getPreferredPairsCount() > 0
+                  ? '${_getPreferredPairsCount()} symbol${_getPreferredPairsCount() == 1 ? '' : 's'} selected'
+                  : 'Choose symbols for new orders',
+              onTap: _openPreferredPairs,
+            ),
+
+            const SizedBox(height: 12),
+
+            // Symbol Suffixes Card
+            _buildNavigationCard(
+              icon: Icons.text_fields_outlined,
+              title: 'Symbol Suffixes',
+              subtitle: _getSuffixesCount() > 0
+                  ? '${_getSuffixesCount()} suffix${_getSuffixesCount() == 1 ? '' : 'es'} configured'
+                  : 'Add broker symbol suffixes',
+              onTap: _openSymbolSuffixes,
+            ),
+
+            const SizedBox(height: 12),
+
+            // Confirm Before Close Checkbox
+            GestureDetector(
+              onTap: () => _toggleConfirmBeforeClose(!_confirmBeforeClose),
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(
+                        color: AppColors.primaryWithOpacity(0.15),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(
+                        Icons.warning_amber_rounded,
+                        color: AppColors.primary,
+                        size: 24,
+                      ),
                     ),
-                    child: const Icon(
-                      Icons.warning_amber_rounded,
-                      color: AppColors.primary,
-                      size: 24,
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Confirm Before Closing',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Confirm Before Closing',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          _confirmBeforeClose 
-                              ? 'Show confirmation dialog before closing positions'
-                              : 'Close positions without confirmation',
-                          style: const TextStyle(
-                            color: AppColors.textSecondary,
-                            fontSize: 12,
+                          const SizedBox(height: 4),
+                          Text(
+                            _confirmBeforeClose
+                                ? 'Show confirmation dialog before closing positions'
+                                : 'Close positions without confirmation',
+                            style: const TextStyle(
+                              color: AppColors.textSecondary,
+                              fontSize: 12,
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
-                  Checkbox(
-                    value: _confirmBeforeClose,
-                    onChanged: (v) => _toggleConfirmBeforeClose(v ?? false),
-                    activeColor: AppColors.primary,
-                    side: const BorderSide(color: AppColors.textSecondary),
-                  ),
-                ],
+                    Container(
+                      width: 20,
+                      height: 20,
+                      decoration: BoxDecoration(
+                        color: _confirmBeforeClose
+                            ? AppColors.primary
+                            : Colors.transparent,
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(
+                          color: _confirmBeforeClose
+                              ? AppColors.primary
+                              : AppColors.textSecondary,
+                        ),
+                      ),
+                      child: _confirmBeforeClose
+                          ? const Icon(
+                              Icons.check,
+                              size: 16,
+                              color: Colors.black,
+                            )
+                          : null,
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
-          
-          const SizedBox(height: 12),
-          
-          // Include Commission & Swap Checkbox
-          GestureDetector(
-            onTap: () => _toggleCommissionSwap(!_includeCommissionSwap),
-            child: Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: AppColors.surface,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppColors.border),
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    width: 48,
-                    height: 48,
-                    decoration: BoxDecoration(
-                      color: AppColors.primaryWithOpacity(0.15),
-                      borderRadius: BorderRadius.circular(10),
+
+            const SizedBox(height: 12),
+
+            // Include Commission & Swap Checkbox
+            GestureDetector(
+              onTap: () => _toggleCommissionSwap(!_includeCommissionSwap),
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(
+                        color: AppColors.primaryWithOpacity(0.15),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(
+                        Icons.calculate_outlined,
+                        color: AppColors.primary,
+                        size: 24,
+                      ),
                     ),
-                    child: const Icon(
-                      Icons.calculate_outlined,
-                      color: AppColors.primary,
-                      size: 24,
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Include Commission & Swap',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Include Commission & Swap',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          _includeCommissionSwap 
-                              ? 'P/L includes commission and swap fees'
-                              : 'P/L shows raw profit only',
-                          style: const TextStyle(
-                            color: AppColors.textSecondary,
-                            fontSize: 12,
+                          const SizedBox(height: 4),
+                          Text(
+                            _includeCommissionSwap
+                                ? 'P/L includes commission and swap fees'
+                                : 'P/L shows raw profit only',
+                            style: const TextStyle(
+                              color: AppColors.textSecondary,
+                              fontSize: 12,
+                            ),
                           ),
+                        ],
+                      ),
+                    ),
+                    Container(
+                      width: 20,
+                      height: 20,
+                      decoration: BoxDecoration(
+                        color: _includeCommissionSwap
+                            ? AppColors.primary
+                            : Colors.transparent,
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(
+                          color: _includeCommissionSwap
+                              ? AppColors.primary
+                              : AppColors.textSecondary,
                         ),
-                      ],
+                      ),
+                      child: _includeCommissionSwap
+                          ? const Icon(
+                              Icons.check,
+                              size: 16,
+                              color: Colors.black,
+                            )
+                          : null,
                     ),
-                  ),
-                  Checkbox(
-                    value: _includeCommissionSwap,
-                    onChanged: (v) => _toggleCommissionSwap(v ?? false),
-                    activeColor: AppColors.primary,
-                    side: const BorderSide(color: AppColors.textSecondary),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          
-          const SizedBox(height: 12),
-          
-          // Show P/L % Checkbox
-          GestureDetector(
-            onTap: () => _toggleShowPLPercent(!_showPLPercent),
-            child: Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: AppColors.surface,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppColors.border),
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    width: 48,
-                    height: 48,
-                    decoration: BoxDecoration(
-                      color: AppColors.primaryWithOpacity(0.15),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: const Icon(
-                      Icons.percent,
-                      color: AppColors.primary,
-                      size: 24,
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Show P/L %',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          _showPLPercent 
-                              ? 'Display P/L as percentage of balance'
-                              : 'P/L percentage hidden',
-                          style: const TextStyle(
-                            color: AppColors.textSecondary,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Checkbox(
-                    value: _showPLPercent,
-                    onChanged: (v) => _toggleShowPLPercent(v ?? false),
-                    activeColor: AppColors.primary,
-                    side: const BorderSide(color: AppColors.textSecondary),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
-        ],
+
+            const SizedBox(height: 12),
+
+            // Show P/L % Checkbox
+            GestureDetector(
+              onTap: () => _toggleShowPLPercent(!_showPLPercent),
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(
+                        color: AppColors.primaryWithOpacity(0.15),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(
+                        Icons.percent,
+                        color: AppColors.primary,
+                        size: 24,
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Show P/L %',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            _showPLPercent
+                                ? 'Display P/L as percentage of balance'
+                                : 'P/L percentage hidden',
+                            style: const TextStyle(
+                              color: AppColors.textSecondary,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Container(
+                      width: 20,
+                      height: 20,
+                      decoration: BoxDecoration(
+                        color: _showPLPercent
+                            ? AppColors.primary
+                            : Colors.transparent,
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(
+                          color: _showPLPercent
+                              ? AppColors.primary
+                              : AppColors.textSecondary,
+                        ),
+                      ),
+                      child: _showPLPercent
+                          ? const Icon(
+                              Icons.check,
+                              size: 16,
+                              color: Colors.black,
+                            )
+                          : null,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -492,11 +562,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 color: AppColors.primaryWithOpacity(0.15),
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: Icon(
-                icon,
-                color: AppColors.primary,
-                size: 24,
-              ),
+              child: Icon(icon, color: AppColors.primary, size: 24),
             ),
             const SizedBox(width: 16),
             Expanded(

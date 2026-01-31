@@ -141,8 +141,16 @@ class _SymbolSuffixesScreenState extends State<SymbolSuffixesScreen> {
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
-        backgroundColor: AppColors.background,
-        title: const Text('Symbol Suffixes', style: TextStyle(color: Colors.white)),
+        backgroundColor: AppColors.surface,
+        elevation: 0,
+        title: const Text(
+          'Symbol Suffixes',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
         leading: IconButton(
           icon: const Icon(Icons.chevron_left, color: Colors.white),
           onPressed: () => Navigator.pop(context),

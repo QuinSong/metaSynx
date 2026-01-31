@@ -97,7 +97,7 @@ class _RiskCalculatorScreenState extends State<RiskCalculatorScreen> {
       }
       _selectedAccountIndex ??= 0;
       _updateAccountInfo();
-      _updateSuffixState(); // Set initial suffix state
+      _loadSavedSuffixPref(); // Load saved suffix preference
     }
     
     _entryController.addListener(_calculate);
@@ -126,12 +126,30 @@ class _RiskCalculatorScreenState extends State<RiskCalculatorScreen> {
     return widget.symbolSuffixes[accountNum] ?? '';
   }
 
+  Future<void> _loadSavedSuffixPref() async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedSuffix = prefs.getBool('apply_suffix');
+    if (savedSuffix != null) {
+      setState(() {
+        _applySuffix = savedSuffix;
+      });
+    } else {
+      // Default: enable if suffix is configured
+      final suffix = _getCurrentSuffix();
+      setState(() {
+        _applySuffix = suffix.isNotEmpty;
+      });
+    }
+  }
+
+  Future<void> _saveSuffixPref() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('apply_suffix', _applySuffix);
+  }
+
   void _updateSuffixState() {
-    final suffix = _getCurrentSuffix();
-    // Only enable suffix toggle if a suffix is configured for this account
-    setState(() {
-      _applySuffix = suffix.isNotEmpty;
-    });
+    // Only called when account changes - check if saved pref exists
+    _loadSavedSuffixPref();
   }
 
   String _getSymbolWithSuffix(String symbol) {
@@ -391,13 +409,20 @@ class _RiskCalculatorScreenState extends State<RiskCalculatorScreen> {
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
-        backgroundColor: AppColors.background,
-        toolbarHeight: 50,
+        backgroundColor: AppColors.surface,
+        elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.chevron_left, color: Colors.white),
           onPressed: () => Navigator.pop(context),
         ),
-        title: const Text('Risk Calculator', style: TextStyle(color: Colors.white, fontSize: 18)),
+        title: const Text(
+          'Risk Calculator',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
         actions: [
           if (_hasSearched)
             IconButton(
@@ -409,7 +434,7 @@ class _RiskCalculatorScreenState extends State<RiskCalculatorScreen> {
       ),
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+          padding: const EdgeInsets.all(16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -634,6 +659,7 @@ class _RiskCalculatorScreenState extends State<RiskCalculatorScreen> {
               setState(() {
                 _applySuffix = !_applySuffix;
               });
+              _saveSuffixPref();
             },
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
@@ -644,24 +670,13 @@ class _RiskCalculatorScreenState extends State<RiskCalculatorScreen> {
                   color: _applySuffix ? AppColors.primary : AppColors.border,
                 ),
               ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.add_link,
-                    color: _applySuffix ? Colors.white : AppColors.textSecondary,
-                    size: 20,
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    suffix,
-                    style: TextStyle(
-                      color: _applySuffix ? Colors.white : AppColors.textSecondary,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
+              child: Text(
+                suffix,
+                style: TextStyle(
+                  color: _applySuffix ? Colors.white : AppColors.textSecondary,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                ),
               ),
             ),
           ),

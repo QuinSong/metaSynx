@@ -15,6 +15,7 @@ import 'settings/settings.dart';
 import 'chart.dart';
 import 'history.dart';
 import 'risk_calculator.dart';
+import 'overview.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -40,6 +41,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final StreamController<Map<String, dynamic>> _symbolInfoController =
       StreamController<Map<String, dynamic>>.broadcast();
   Map<String, String> _accountNames = {};
+  Set<String> _hiddenAccounts = {};
   String? _mainAccountNum;
   Map<String, double> _lotRatios = {};
   Map<String, String> _symbolSuffixes = {};
@@ -93,6 +95,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final namesJson = prefs.getString('account_names');
     if (namesJson != null) {
       _accountNames = Map<String, String>.from(jsonDecode(namesJson));
+    }
+
+    // Load hidden accounts
+    final hiddenList = prefs.getStringList('hidden_accounts');
+    if (hiddenList != null) {
+      _hiddenAccounts = hiddenList.toSet();
     }
 
     // Load main account
@@ -387,13 +395,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     });
   }
 
-  void _modifyPendingOrder(int ticket, int terminalIndex, double price) {
-    _connection.send({
+  void _modifyPendingOrder(int ticket, int terminalIndex, double price, {double? sl, double? tp}) {
+    debugPrint('_modifyPendingOrder called: ticket=$ticket, price=$price, sl=$sl, tp=$tp');
+    final message = <String, dynamic>{
       'action': 'modify_pending',
       'ticket': ticket,
       'terminalIndex': terminalIndex,
       'price': price,
-    });
+    };
+    if (sl != null) message['sl'] = sl;
+    if (tp != null) message['tp'] = tp;
+    debugPrint('Sending message: $message');
+    _connection.send(message);
   }
 
   void _requestChartData(String symbol, String timeframe, int terminalIndex) {
@@ -446,6 +459,34 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           chartDataStream: _chartDataController.stream,
           onRequestChartData: _requestChartData,
           bottomNavBar: _buildExternalNavBar(1), // Chart highlighted
+        ),
+      ),
+    );
+  }
+
+  void _openTotalOverview() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => TotalOverviewScreen(
+          accountsNotifier: _accountsNotifier,
+          positionsNotifier: _positionsNotifier,
+          onClosePosition: _closePosition,
+          onModifyPosition: _modifyPosition,
+          onCancelOrder: _cancelOrder,
+          onModifyPendingOrder: _modifyPendingOrder,
+          accountNames: _accountNames,
+          mainAccountNum: _mainAccountNum,
+          includeCommissionSwap: _includeCommissionSwap,
+          showPLPercent: _showPLPercent,
+          confirmBeforeClose: _confirmBeforeClose,
+          onConfirmBeforeCloseChanged: _updateConfirmBeforeClose,
+          symbolSuffixes: _symbolSuffixes,
+          lotRatios: _lotRatios,
+          preferredPairs: _preferredPairs,
+          onPlaceOrder: _placeOrder,
+          chartDataStream: _chartDataController.stream,
+          onRequestChartData: _requestChartData,
         ),
       ),
     );
@@ -619,6 +660,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         return SettingsScreen(
           accounts: _accountsNotifier.value,
           accountNames: _accountNames,
+          hiddenAccounts: _hiddenAccounts,
           mainAccountNum: _mainAccountNum,
           lotRatios: _lotRatios,
           symbolSuffixes: _symbolSuffixes,
@@ -631,6 +673,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               _accountNames = names;
             });
             _saveSettings();
+          },
+          onHiddenAccountsUpdated: (hidden) {
+            setState(() {
+              _hiddenAccounts = hidden;
+            });
           },
           onMainAccountUpdated: (accountNum) {
             setState(() {
@@ -742,9 +789,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       child: ValueListenableBuilder<List<Map<String, dynamic>>>(
                         valueListenable: _positionsNotifier,
                         builder: (context, positions, _) {
+                          // Filter out hidden accounts
+                          final visibleAccounts = accounts.where((account) {
+                            final accountNum = account['account'] as String? ?? '';
+                            return !_hiddenAccounts.contains(accountNum);
+                          }).toList();
+                          
                           // Sort accounts with main account first
                           final sortedAccounts = List<Map<String, dynamic>>.from(
-                            accounts,
+                            visibleAccounts,
                           );
                           sortedAccounts.sort((a, b) {
                             final aIsMain = a['account'] == _mainAccountNum;
@@ -945,7 +998,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       children: [
         Image.asset(
           'assets/logo.png',
-          height: 36,
+          height: 38,
         ),
         const Spacer(),
         if (showButtons) ...[
@@ -1019,6 +1072,90 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
+  /// Check if all positions on an account are fully hedged
+  bool _isAccountFullyHedged(int accountIndex, List<Map<String, dynamic>> positions) {
+    // Get all market positions for this account (exclude pending orders)
+    final accountPositions = positions.where((p) {
+      final pType = (p['type'] as String?)?.toLowerCase() ?? '';
+      return p['terminalIndex'] == accountIndex && 
+             !pType.contains('limit') && !pType.contains('stop');
+    }).toList();
+    
+    if (accountPositions.isEmpty) return false;
+    
+    // Group positions by symbol
+    final positionsBySymbol = <String, List<Map<String, dynamic>>>{};
+    for (final pos in accountPositions) {
+      final symbol = pos['symbol'] as String? ?? '';
+      positionsBySymbol.putIfAbsent(symbol, () => []).add(pos);
+    }
+    
+    // Check each symbol - all positions must be hedged
+    for (final symbolPositions in positionsBySymbol.values) {
+      final buyPositions = <Map<String, dynamic>>[];
+      final sellPositions = <Map<String, dynamic>>[];
+      
+      for (final p in symbolPositions) {
+        final pType = (p['type'] as String?)?.toLowerCase() ?? '';
+        if (pType.contains('buy')) {
+          buyPositions.add(p);
+        } else if (pType.contains('sell')) {
+          sellPositions.add(p);
+        }
+      }
+      
+      // If only one direction, not hedged
+      if (buyPositions.isEmpty || sellPositions.isEmpty) return false;
+      
+      // Sort by lots descending
+      buyPositions.sort((a, b) => ((b['lots'] as num?)?.toDouble() ?? 0)
+          .compareTo((a['lots'] as num?)?.toDouble() ?? 0));
+      sellPositions.sort((a, b) => ((b['lots'] as num?)?.toDouble() ?? 0)
+          .compareTo((a['lots'] as num?)?.toDouble() ?? 0));
+      
+      // Try to match all positions
+      final usedBuyIndices = <int>{};
+      final usedSellIndices = <int>{};
+      
+      for (int i = 0; i < buyPositions.length; i++) {
+        final buyLot = (buyPositions[i]['lots'] as num?)?.toDouble() ?? 0;
+        bool matched = false;
+        
+        for (int j = 0; j < sellPositions.length; j++) {
+          if (usedSellIndices.contains(j)) continue;
+          final sellLot = (sellPositions[j]['lots'] as num?)?.toDouble() ?? 0;
+          
+          if ((buyLot - sellLot).abs() < 0.0001) {
+            usedBuyIndices.add(i);
+            usedSellIndices.add(j);
+            matched = true;
+            break;
+          }
+        }
+        
+        if (!matched) return false; // Unmatched buy position
+      }
+      
+      // Check if any sell positions are unmatched
+      if (usedSellIndices.length != sellPositions.length) return false;
+    }
+    
+    return true;
+  }
+
+  /// Check if all listed accounts are fully hedged
+  bool _areAllAccountsFullyHedged(List<Map<String, dynamic>> accounts, List<Map<String, dynamic>> positions) {
+    if (accounts.isEmpty) return false;
+    
+    for (final account in accounts) {
+      final accountIndex = account['index'] as int? ?? -1;
+      if (!_isAccountFullyHedged(accountIndex, positions)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   Widget _buildTotalsSection(
     List<Map<String, dynamic>> accounts,
     List<Map<String, dynamic>> positions,
@@ -1048,128 +1185,160 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
     }
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            AppColors.primaryWithOpacity(0.15),
-            AppColors.primaryWithOpacity(0.05),
-          ],
-        ),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.primary.withOpacity(0.3)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'TOTAL',
-            style: TextStyle(
-              color: AppColors.primary,
-              fontSize: 12,
-              fontWeight: FontWeight.bold,
-              letterSpacing: 1,
-            ),
+    final allHedged = _areAllAccountsFullyHedged(accounts, positions);
+
+    return GestureDetector(
+      onTap: () => _openTotalOverview(),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 16),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              AppColors.primaryWithOpacity(0.15),
+              AppColors.primaryWithOpacity(0.05),
+            ],
           ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.primary.withOpacity(0.3)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
                   children: [
                     const Text(
-                      'Balance',
+                      'TOTAL',
                       style: TextStyle(
-                        color: AppColors.textSecondary,
-                        fontSize: 11,
+                        color: AppColors.primary,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1,
                       ),
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      Formatters.formatCurrency(totalBalance),
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Equity',
-                      style: TextStyle(
-                        color: AppColors.textSecondary,
-                        fontSize: 11,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      Formatters.formatCurrency(totalEquity),
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Text(
-                          _includeCommissionSwap ? 'Net P/L' : 'P/L',
-                          style: const TextStyle(
-                            color: AppColors.textSecondary,
-                            fontSize: 11,
-                          ),
+                    if (allHedged) ...[
+                      const SizedBox(width: 8),
+                      Container(
+                        width: 8,
+                        height: 8,
+                        decoration: const BoxDecoration(
+                          color: Colors.orange,
+                          shape: BoxShape.circle,
                         ),
-                        if (_showPLPercent && totalBalance > 0) ...[
-                          const SizedBox(width: 8),
+                      ),
+                    ],
+                  ],
+                ),
+                const Icon(
+                  Icons.chevron_right,
+                  color: AppColors.textSecondary,
+                  size: 20,
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Balance',
+                        style: TextStyle(
+                          color: AppColors.textSecondary,
+                          fontSize: 11,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        Formatters.formatCurrency(totalBalance),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Equity',
+                        style: TextStyle(
+                          color: AppColors.textSecondary,
+                          fontSize: 11,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        Formatters.formatCurrency(totalEquity),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
                           Text(
-                            '${((totalProfit / totalBalance) * 100).toStringAsFixed(2)}%',
-                            style: TextStyle(
-                              color: totalProfit == 0
-                                  ? Colors.white
-                                  : (totalProfit > 0
-                                        ? AppColors.primary
-                                        : AppColors.error),
+                            _includeCommissionSwap ? 'Net P/L' : 'P/L',
+                            style: const TextStyle(
+                              color: AppColors.textSecondary,
                               fontSize: 11,
                             ),
                           ),
+                          if (_showPLPercent && totalBalance > 0) ...[
+                            const SizedBox(width: 8),
+                            Text(
+                              '${((totalProfit / totalBalance) * 100).toStringAsFixed(2)}%',
+                              style: TextStyle(
+                                color: totalProfit == 0
+                                    ? Colors.white
+                                    : (totalProfit > 0
+                                          ? AppColors.primary
+                                          : AppColors.error),
+                                fontSize: 11,
+                              ),
+                            ),
+                          ],
                         ],
-                      ],
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      Formatters.formatCurrencyWithSign(totalProfit),
-                      style: TextStyle(
-                        color: totalProfit >= 0
-                            ? AppColors.primary
-                            : AppColors.error,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
                       ),
-                    ),
-                  ],
+                      const SizedBox(height: 2),
+                      Text(
+                        Formatters.formatCurrencyWithSign(totalProfit),
+                        style: TextStyle(
+                          color: totalProfit == 0
+                              ? Colors.white
+                              : (totalProfit > 0
+                                    ? AppColors.primary
+                                    : AppColors.error),
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-            ],
-          ),
-        ],
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1200,6 +1369,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         profit += rawProfit;
       }
     }
+
+    // Check if account is fully hedged
+    final isFullyHedged = _isAccountFullyHedged(accountIndex, _positionsNotifier.value);
 
     return GestureDetector(
       onTap: () => _openAccountDetail(account),
@@ -1252,6 +1424,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                   fontSize: 9,
                                   fontWeight: FontWeight.bold,
                                 ),
+                              ),
+                            ),
+                          ],
+                          if (isFullyHedged) ...[
+                            const SizedBox(width: 8),
+                            Container(
+                              width: 8,
+                              height: 8,
+                              decoration: const BoxDecoration(
+                                color: Colors.orange,
+                                shape: BoxShape.circle,
                               ),
                             ),
                           ],

@@ -196,12 +196,25 @@ class _HistoryScreenState extends State<HistoryScreen> with SingleTickerProvider
   Widget build(BuildContext context) {
     final uniqueAccounts = _getUniqueAccounts().toList()..sort();
     
+    // Validate account selection
+    final validAccount = _selectedAccount != null && uniqueAccounts.contains(_selectedAccount)
+        ? _selectedAccount
+        : null;
+    
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
-        backgroundColor: AppColors.background,
+        backgroundColor: AppColors.surface,
+        elevation: 0,
         automaticallyImplyLeading: false,
-        title: const Text('Trade History', style: TextStyle(color: Colors.white)),
+        title: const Text(
+          'Trade History',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
         bottom: TabBar(
           controller: _tabController,
           indicatorColor: AppColors.primary,
@@ -225,7 +238,7 @@ class _HistoryScreenState extends State<HistoryScreen> with SingleTickerProvider
                 // Account filter
                 Expanded(
                   child: _buildFilterDropdown(
-                    value: _selectedAccount,
+                    value: validAccount,
                     hint: 'All Accounts',
                     items: uniqueAccounts.map((acc) => DropdownMenuItem<String>(
                       value: acc,
@@ -254,8 +267,13 @@ class _HistoryScreenState extends State<HistoryScreen> with SingleTickerProvider
                               : _monthHistory;
                       final uniqueSymbols = _getUniqueSymbols(currentHistory).toList()..sort();
                       
+                      // Reset selection if current symbol not in this tab's list
+                      final validValue = _selectedSymbol != null && uniqueSymbols.contains(_selectedSymbol)
+                          ? _selectedSymbol
+                          : null;
+                      
                       return _buildFilterDropdown(
-                        value: _selectedSymbol,
+                        value: validValue,
                         hint: 'All Symbols',
                         items: uniqueSymbols.map((sym) => DropdownMenuItem<String>(
                           value: sym,

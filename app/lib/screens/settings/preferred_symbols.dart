@@ -82,6 +82,21 @@ class _PreferredSymbolsScreenState extends State<PreferredSymbolsScreen> {
     widget.onPairsUpdated(_selectedPairs);
   }
 
+  Future<void> _saveAndClose() async {
+    await _savePairs();
+    await _saveCustomPairs();
+    
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Preferred symbols saved'),
+          backgroundColor: AppColors.primary,
+        ),
+      );
+      Navigator.pop(context);
+    }
+  }
+
   void _togglePair(String pair) {
     setState(() {
       if (_selectedPairs.contains(pair)) {
@@ -157,17 +172,37 @@ class _PreferredSymbolsScreenState extends State<PreferredSymbolsScreen> {
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
-        backgroundColor: AppColors.background,
-        title: const Text('Preferred Symbols', style: TextStyle(color: Colors.white)),
+        backgroundColor: AppColors.surface,
+        elevation: 0,
+        title: const Text(
+          'Preferred Symbols',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
         leading: IconButton(
           icon: const Icon(Icons.chevron_left, color: Colors.white),
           onPressed: () => Navigator.pop(context),
         ),
+        actions: [
+          TextButton(
+            onPressed: _saveAndClose,
+            child: const Text(
+              'SAVE',
+              style: TextStyle(
+                color: AppColors.primary,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ],
       ),
       body: SafeArea(
         top: false, // AppBar handles top
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+          padding: const EdgeInsets.all(16),
           children: [
             // Info section
             Container(
