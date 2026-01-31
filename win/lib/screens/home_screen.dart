@@ -110,6 +110,19 @@ class _HomeScreenState extends State<HomeScreen> {
         if (!_disposed) _addLog(msg);
       },
     );
+    
+    // Handle room expired - clear saved room and create new one
+    _connection!.onRoomExpired = () async {
+      if (_disposed || !mounted) return;
+      _addLog('⚠️ Room expired, creating new room...');
+      await _clearSavedRoom();
+      setState(() {
+        _mobileHasConnected = false;
+        _mobileDeviceName = null;
+      });
+      // Create a fresh room
+      await _createNewRoom();
+    };
 
     if (_disposed) return;
     await _createRoomAndConnect();
@@ -454,6 +467,31 @@ class _HomeScreenState extends State<HomeScreen> {
     await prefs.remove('room_id');
     await prefs.remove('room_secret');
     await prefs.remove('room_server');
+  }
+
+  Future<void> _createNewRoom() async {
+    if (_disposed || !mounted) return;
+    setState(() => _status = ConnectionStatus.connecting);
+
+    try {
+      final credentials = await RoomService.createRoom(widget.relayServer);
+      _roomId = credentials.roomId;
+      _roomSecret = credentials.roomSecret;
+
+      // Save room credentials
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('room_id', _roomId!);
+      await prefs.setString('room_secret', _roomSecret!);
+      await prefs.setString('room_server', widget.relayServer);
+
+      _qrData = RoomService.generateQrPayload(widget.relayServer, _roomId!, _roomSecret!);
+      setState(() {});
+
+      await _connection!.connect(_roomId!, _roomSecret!);
+    } catch (e) {
+      _addLog('Error creating room: $e');
+      setState(() => _status = ConnectionStatus.error);
+    }
   }
 
   void _addLog(String message) {

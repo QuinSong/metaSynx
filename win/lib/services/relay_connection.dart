@@ -15,6 +15,7 @@ class RelayConnection {
   final Function(bool, String?) onPairingStatusChanged;
   final Function(Map<String, dynamic>) onMessageReceived;
   final Function(String) onLog;
+  Function()? onRoomExpired;  // Called when room no longer exists
 
   WebSocket? _socket;
   Timer? _reconnectTimer;
@@ -81,10 +82,18 @@ class RelayConnection {
           break;
 
         case 'error':
-          onLog('Server error: ${message['message']}');
-          if (message['message'] == 'Invalid room secret') {
+          final errorMsg = message['message'] as String?;
+          onLog('Server error: $errorMsg');
+          if (errorMsg == 'Invalid room secret') {
+            // Invalid secret - stop reconnecting
+            _intentionalDisconnect = true;
+            _reconnectTimer?.cancel();
+            _currentRoomId = null;
+            _currentRoomSecret = null;
             onStatusChanged(ConnectionStatus.error);
+            onRoomExpired?.call();
           }
+          // For "Room not found or expired", keep reconnecting - room may come back
           break;
 
         default:

@@ -29,7 +29,7 @@ from datetime import datetime, timedelta
 # ============================================
 
 API_KEY = "msxkey2026"              # API key for authentication
-ROOM_EXPIRY_MINUTES = 60              # Room expires after 1 hour of NO activity (bridge disconnected)
+ROOM_EXPIRY_MINUTES = 4320            # Room expires after 72 hours (3 days) of NO activity (bridge disconnected)
 ROOM_CODE_LENGTH = 8                # Length of room codes
 ROOM_SECRET_LENGTH = 16             # Length of room secrets
 MAX_ROOMS_PER_IP = 1                  # Prevent abuse
@@ -200,16 +200,17 @@ class RelayManager:
         return True
     
     async def leave_room(self, room_id: str, role: str):
-        """Leave a room. If bridge leaves, delete the entire room."""
+        """Leave a room. Room persists until expiry even if bridge disconnects."""
         room = self.get_room(room_id)
         if not room:
             return
         
         if role == "bridge":
-            # Bridge disconnected - delete the entire room
-            # Without a bridge, the room is useless
-            print(f"[Room {room_id}] Bridge disconnected - deleting room")
-            await self.close_room(room_id)
+            # Bridge disconnected - keep room alive for reconnection
+            room.bridge = None
+            print(f"[Room {room_id}] Bridge disconnected - room kept for reconnection")
+            # Notify mobile that bridge disconnected
+            await self._notify_pairing_status(room)
         elif role == "mobile":
             room.mobile = None
             print(f"[Room {room_id}] Mobile left")

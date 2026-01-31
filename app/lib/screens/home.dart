@@ -28,7 +28,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final relay.RelayConnection _connection = relay.RelayConnection();
   relay.ConnectionState _connectionState = relay.ConnectionState.disconnected;
   bool _bridgeConnected = false;
-  bool _hasSavedConnection = false;  // True if we have a saved connection config
+  bool _hasSavedConnection = false; // True if we have a saved connection config
   String? _roomId;
   final ValueNotifier<List<Map<String, dynamic>>> _accountsNotifier =
       ValueNotifier<List<Map<String, dynamic>>>([]);
@@ -277,6 +277,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('last_connection', jsonEncode(result));
+        setState(() => _hasSavedConnection = true);
       } catch (e) {
         _showError('Connection failed: $e');
         setState(() => _connectionState = relay.ConnectionState.disconnected);
@@ -395,8 +396,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     });
   }
 
-  void _modifyPendingOrder(int ticket, int terminalIndex, double price, {double? sl, double? tp}) {
-    debugPrint('_modifyPendingOrder called: ticket=$ticket, price=$price, sl=$sl, tp=$tp');
+  void _modifyPendingOrder(
+    int ticket,
+    int terminalIndex,
+    double price, {
+    double? sl,
+    double? tp,
+  }) {
+    debugPrint(
+      '_modifyPendingOrder called: ticket=$ticket, price=$price, sl=$sl, tp=$tp',
+    );
     final message = <String, dynamic>{
       'action': 'modify_pending',
       'ticket': ticket,
@@ -567,7 +576,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     // Clear room ID first to prevent "room expired" error from triggering
     _roomId = null;
     _hasSavedConnection = false;
-    
+
     _connection.disconnect();
     _stopAccountsRefresh();
     final prefs = await SharedPreferences.getInstance();
@@ -608,8 +617,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     final isConnectedToBridge =
-        _connectionState == relay.ConnectionState.connected &&
-        _bridgeConnected;
+        _connectionState == relay.ConnectionState.connected && _bridgeConnected;
 
     // Show accounts view if connected to bridge OR if we have cached accounts (reconnecting)
     final showAccountsView =
@@ -776,7 +784,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     ],
                   );
                 }
-                
+
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -791,14 +799,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         builder: (context, positions, _) {
                           // Filter out hidden accounts
                           final visibleAccounts = accounts.where((account) {
-                            final accountNum = account['account'] as String? ?? '';
+                            final accountNum =
+                                account['account'] as String? ?? '';
                             return !_hiddenAccounts.contains(accountNum);
                           }).toList();
-                          
+
                           // Sort accounts with main account first
-                          final sortedAccounts = List<Map<String, dynamic>>.from(
-                            visibleAccounts,
-                          );
+                          final sortedAccounts =
+                              List<Map<String, dynamic>>.from(visibleAccounts);
                           sortedAccounts.sort((a, b) {
                             final aIsMain = a['account'] == _mainAccountNum;
                             final bIsMain = b['account'] == _mainAccountNum;
@@ -835,10 +843,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Widget _buildDisconnectedContent() {
     // When not connected and no cached accounts
     final bottomPadding = MediaQuery.of(context).padding.bottom;
-    
+
     // Show reconnecting card if we have a saved connection but not fully connected
-    final isReconnecting = _hasSavedConnection && 
-        !(_connectionState == relay.ConnectionState.connected && _bridgeConnected);
+    final isReconnecting =
+        _hasSavedConnection &&
+        !(_connectionState == relay.ConnectionState.connected &&
+            _bridgeConnected);
 
     return SafeArea(
       bottom: false, // We'll handle bottom separately for the button
@@ -851,7 +861,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 _buildHeader(),
-                const SizedBox(height: 10),
+                const SizedBox(height: 30),
                 ConnectionCard(
                   connectionState: _connectionState,
                   bridgeConnected: _bridgeConnected,
@@ -863,7 +873,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ),
           ),
           const Spacer(),
-          if (_connectionState == relay.ConnectionState.disconnected && !_hasSavedConnection)
+          if (_connectionState == relay.ConnectionState.disconnected &&
+              !_hasSavedConnection)
             Padding(
               padding: EdgeInsets.fromLTRB(24, 24, 24, 24 + bottomPadding),
               child: ScanButton(onPressed: _openScanner),
@@ -996,10 +1007,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     return Row(
       children: [
-        Image.asset(
-          'assets/logo.png',
-          height: 38,
-        ),
+        Image.asset('assets/logo.png', height: 38),
         const Spacer(),
         if (showButtons) ...[
           IconButton(
@@ -1073,28 +1081,32 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   /// Check if all positions on an account are fully hedged
-  bool _isAccountFullyHedged(int accountIndex, List<Map<String, dynamic>> positions) {
+  bool _isAccountFullyHedged(
+    int accountIndex,
+    List<Map<String, dynamic>> positions,
+  ) {
     // Get all market positions for this account (exclude pending orders)
     final accountPositions = positions.where((p) {
       final pType = (p['type'] as String?)?.toLowerCase() ?? '';
-      return p['terminalIndex'] == accountIndex && 
-             !pType.contains('limit') && !pType.contains('stop');
+      return p['terminalIndex'] == accountIndex &&
+          !pType.contains('limit') &&
+          !pType.contains('stop');
     }).toList();
-    
+
     if (accountPositions.isEmpty) return false;
-    
+
     // Group positions by symbol
     final positionsBySymbol = <String, List<Map<String, dynamic>>>{};
     for (final pos in accountPositions) {
       final symbol = pos['symbol'] as String? ?? '';
       positionsBySymbol.putIfAbsent(symbol, () => []).add(pos);
     }
-    
+
     // Check each symbol - all positions must be hedged
     for (final symbolPositions in positionsBySymbol.values) {
       final buyPositions = <Map<String, dynamic>>[];
       final sellPositions = <Map<String, dynamic>>[];
-      
+
       for (final p in symbolPositions) {
         final pType = (p['type'] as String?)?.toLowerCase() ?? '';
         if (pType.contains('buy')) {
@@ -1103,28 +1115,34 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           sellPositions.add(p);
         }
       }
-      
+
       // If only one direction, not hedged
       if (buyPositions.isEmpty || sellPositions.isEmpty) return false;
-      
+
       // Sort by lots descending
-      buyPositions.sort((a, b) => ((b['lots'] as num?)?.toDouble() ?? 0)
-          .compareTo((a['lots'] as num?)?.toDouble() ?? 0));
-      sellPositions.sort((a, b) => ((b['lots'] as num?)?.toDouble() ?? 0)
-          .compareTo((a['lots'] as num?)?.toDouble() ?? 0));
-      
+      buyPositions.sort(
+        (a, b) => ((b['lots'] as num?)?.toDouble() ?? 0).compareTo(
+          (a['lots'] as num?)?.toDouble() ?? 0,
+        ),
+      );
+      sellPositions.sort(
+        (a, b) => ((b['lots'] as num?)?.toDouble() ?? 0).compareTo(
+          (a['lots'] as num?)?.toDouble() ?? 0,
+        ),
+      );
+
       // Try to match all positions
       final usedBuyIndices = <int>{};
       final usedSellIndices = <int>{};
-      
+
       for (int i = 0; i < buyPositions.length; i++) {
         final buyLot = (buyPositions[i]['lots'] as num?)?.toDouble() ?? 0;
         bool matched = false;
-        
+
         for (int j = 0; j < sellPositions.length; j++) {
           if (usedSellIndices.contains(j)) continue;
           final sellLot = (sellPositions[j]['lots'] as num?)?.toDouble() ?? 0;
-          
+
           if ((buyLot - sellLot).abs() < 0.0001) {
             usedBuyIndices.add(i);
             usedSellIndices.add(j);
@@ -1132,21 +1150,24 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             break;
           }
         }
-        
+
         if (!matched) return false; // Unmatched buy position
       }
-      
+
       // Check if any sell positions are unmatched
       if (usedSellIndices.length != sellPositions.length) return false;
     }
-    
+
     return true;
   }
 
   /// Check if all listed accounts are fully hedged
-  bool _areAllAccountsFullyHedged(List<Map<String, dynamic>> accounts, List<Map<String, dynamic>> positions) {
+  bool _areAllAccountsFullyHedged(
+    List<Map<String, dynamic>> accounts,
+    List<Map<String, dynamic>> positions,
+  ) {
     if (accounts.isEmpty) return false;
-    
+
     for (final account in accounts) {
       final accountIndex = account['index'] as int? ?? -1;
       if (!_isAccountFullyHedged(accountIndex, positions)) {
@@ -1371,7 +1392,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
 
     // Check if account is fully hedged
-    final isFullyHedged = _isAccountFullyHedged(accountIndex, _positionsNotifier.value);
+    final isFullyHedged = _isAccountFullyHedged(
+      accountIndex,
+      _positionsNotifier.value,
+    );
 
     return GestureDetector(
       onTap: () => _openAccountDetail(account),
@@ -1527,10 +1551,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               const SizedBox(width: 8),
               Text(
                 '${plPercent.toStringAsFixed(2)}%',
-                style: TextStyle(
-                  color: plColor,
-                  fontSize: 11,
-                ),
+                style: TextStyle(color: plColor, fontSize: 11),
               ),
             ],
           ],

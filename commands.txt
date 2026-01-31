@@ -32,6 +32,7 @@ curl https://server1.metasynx.io/health
 
 
 
+scp server/websocket_relay.py quinsong@34.147.82.105:/opt/metasynx/websocket_relay.py
 
 
 

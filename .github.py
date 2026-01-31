@@ -2,7 +2,7 @@ import os
 import time
 
 
-msg = 'updated to production, 2'
+msg = 'updated to production, 3'
 
 
 os.system('git add .')
