@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../core/theme.dart';
 import '../services/relay_connection.dart';
 import '../services/room_service.dart';
@@ -119,9 +120,34 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() => _status = ConnectionStatus.connecting);
 
     try {
+      // Try to restore saved room first
+      final prefs = await SharedPreferences.getInstance();
+      final savedRoomId = prefs.getString('room_id');
+      final savedRoomSecret = prefs.getString('room_secret');
+      final savedServer = prefs.getString('room_server');
+      
+      if (savedRoomId != null && savedRoomSecret != null && savedServer == widget.relayServer) {
+        // Try to rejoin saved room
+        _roomId = savedRoomId;
+        _roomSecret = savedRoomSecret;
+        _qrData = RoomService.generateQrPayload(widget.relayServer, _roomId!, _roomSecret!);
+        _mobileHasConnected = true;  // Assume mobile was connected before
+        setState(() {});
+        
+        _addLog('🔄 Restoring previous session...');
+        await _connection!.connect(_roomId!, _roomSecret!);
+        return;
+      }
+      
+      // No saved room or different server - create new room
       final credentials = await RoomService.createRoom(widget.relayServer);
       _roomId = credentials.roomId;
       _roomSecret = credentials.roomSecret;
+
+      // Save room credentials
+      await prefs.setString('room_id', _roomId!);
+      await prefs.setString('room_secret', _roomSecret!);
+      await prefs.setString('room_server', widget.relayServer);
 
       _qrData = RoomService.generateQrPayload(widget.relayServer, _roomId!, _roomSecret!);
       setState(() {});
@@ -148,6 +174,8 @@ class _HomeScreenState extends State<HomeScreen> {
         if (_mobileHasConnected) {
           _userService.decrementActiveRooms(widget.relayServer);
         }
+        // Clear saved room so user needs to scan QR again
+        _clearSavedRoom();
         setState(() {
           _mobileHasConnected = false;  // Reset so QR shows
           _mobileDeviceName = null;
@@ -407,6 +435,9 @@ class _HomeScreenState extends State<HomeScreen> {
       _userService.decrementActiveRooms(widget.relayServer);
     }
     
+    // Clear saved room so a new one is created
+    await _clearSavedRoom();
+    
     _connection?.disconnect();
     setState(() {
       _roomId = null;
@@ -416,6 +447,13 @@ class _HomeScreenState extends State<HomeScreen> {
       _mobileDeviceName = null;
     });
     await _createRoomAndConnect();
+  }
+
+  Future<void> _clearSavedRoom() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('room_id');
+    await prefs.remove('room_secret');
+    await prefs.remove('room_server');
   }
 
   void _addLog(String message) {
