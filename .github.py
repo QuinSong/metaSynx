@@ -2,7 +2,7 @@ import os
 import time
 
 
-msg = 'updated to production, 3'
+msg = 'added first native splash and mobile icons'
 
 
 os.system('git add .')

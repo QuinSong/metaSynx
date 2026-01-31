@@ -315,8 +315,6 @@ void WriteChartData(string symbol, int timeframe, int count)
       FileWriteString(handle, json);
       FileClose(handle);
    }
-   
-   Print("Chart data written: ", symbol, " TF:", timeframe, " bars:", barsToGet);
 }
 
 //+------------------------------------------------------------------+
@@ -462,9 +460,10 @@ void ProcessCommand(string jsonCommand)
       double price = StringToDouble(ExtractJsonString(jsonCommand, "price"));
       string slStr = ExtractJsonString(jsonCommand, "sl");
       string tpStr = ExtractJsonString(jsonCommand, "tp");
+      // -1 means not provided (keep existing), 0 or greater means use this value
       double sl = (slStr != "") ? StringToDouble(slStr) : -1;
       double tp = (tpStr != "") ? StringToDouble(tpStr) : -1;
-      Print("MODIFY PENDING COMMAND: ticket=", ticket, " price=", price, " sl=", sl, " tp=", tp);
+      Print("MODIFY PENDING COMMAND: ticket=", ticket, " price=", price, " sl=", sl, " tp=", tp, " slStr=", slStr, " tpStr=", tpStr);
       ModifyPendingOrder(ticket, price, sl, tp);
    }
    else if(action == "get_symbol_info")
@@ -484,7 +483,6 @@ void ProcessCommand(string jsonCommand)
       SymbolSelect(symbol, true);
       
       int timeframe = StringToTimeframe(tf);
-      Print("CHART DATA: symbol=", symbol, " tf=", tf, " (", timeframe, ") count=", count);
       WriteChartData(symbol, timeframe, count);
    }
    else if(action == "subscribe_chart")
@@ -492,7 +490,6 @@ void ProcessCommand(string jsonCommand)
       g_chartSymbol = ExtractJsonString(jsonCommand, "symbol");
       string tf = ExtractJsonString(jsonCommand, "timeframe");
       g_chartTimeframe = StringToTimeframe(tf);
-      Print("CHART SUBSCRIBE: symbol=", g_chartSymbol, " tf=", g_chartTimeframe);
       
       // Send initial history data
       WriteChartData(g_chartSymbol, g_chartTimeframe, 200);
@@ -506,7 +503,6 @@ void ProcessCommand(string jsonCommand)
    {
       g_chartSubscribed = false;
       g_chartSymbol = "";
-      Print("CHART UNSUBSCRIBE");
    }
    else if(action == "get_history")
    {

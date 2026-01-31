@@ -18,10 +18,29 @@ dependencies:
   webview_flutter: ^4.4.2
 
 dev_dependencies:
+  flutter_launcher_icons: ^0.13.1
+  flutter_native_splash: ^2.3.8
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
 
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/logoIcon.png"
+  adaptive_icon_background: "#0A0E14"
+  adaptive_icon_foreground: "assets/logoIcon.png"
+  remove_alpha_ios: true
+
+flutter_native_splash:
+  color: "#0A0E14"
+  image: assets/logo.png
+  android: true
+  ios: true
+  android_12:
+    color: "#0A0E14"
+    image: assets/logo.png
+    
 flutter:
   uses-material-design: true
 
